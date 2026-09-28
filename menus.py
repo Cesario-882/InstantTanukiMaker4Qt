@@ -16,7 +16,7 @@ class MenuBar(QMenuBar):
     """主菜单栏"""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.parent = parent
+        self.parent_widget = parent
 
         # 文件菜单
         menu_file = QMenu(_("ファイル"), self)
@@ -49,18 +49,18 @@ class MenuBar(QMenuBar):
         if not path_save:
             return
 
-        qtlib.post_start_progress(self.parent, "少しお待ちください…", _("プロジェクト保存中"))
+        qtlib.post_start_progress(self.parent_widget, "少しお待ちください…", _("プロジェクト保存中"))
         thread_save = threading.Thread(target=self.save, args=(path_save,))
         thread_save.start()
 
     def save(self, path_save):
         """保存项目（线程）"""
-        with qtlib.progress_context(self.parent, _("保存に失敗しました…"), _("プロジェクト保存失敗")):
+        with qtlib.progress_context(self.parent_widget, _("保存に失敗しました…"), _("プロジェクト保存失敗")):
             CONFIG.save_manager(path_save)
             message = _("保存が完了しました！")
             caption = _("プロジェクト保存完了")
             style = QMessageBox.Icon.Information
-            qtlib.post_end_progress(self.parent, message, caption, style, path_save.parent)
+            qtlib.post_end_progress(self.parent_widget, message, caption, style, path_save.parent)
 
     def on_load(self):
         """加载项目"""
@@ -72,24 +72,24 @@ class MenuBar(QMenuBar):
         if not path_json:
             return
 
-        qtlib.post_start_progress(self.parent, "少しお待ちください…", _("プロジェクト読込中"))
+        qtlib.post_start_progress(self.parent_widget, "少しお待ちください…", _("プロジェクト読込中"))
         thread_load = threading.Thread(target=self.load, args=(path_json,))
         thread_load.start()
 
     def load(self, path_json):
         """加载项目（线程）"""
-        with qtlib.progress_context(self.parent, _("プロジェクトの読み込みに失敗しました..."), _("プロジェクト読込失敗")):
+        with qtlib.progress_context(self.parent_widget, _("プロジェクトの読み込みに失敗しました..."), _("プロジェクト読込失敗")):
             is_completed, message = CONFIG.load_manager(path_json)
             if is_completed:
-                qtlib.post_update(self.parent, True, True, True, reset=True)
+                qtlib.post_update(self.parent_widget, True, True, True, reset=True)
 
             caption = "プロジェクト読込完了" if is_completed else _("プロジェクト読込失敗")
             style = QMessageBox.Icon.Information if is_completed else QMessageBox.Icon.Critical
-            qtlib.post_end_progress(self.parent, message, caption, style)
+            qtlib.post_end_progress(self.parent_widget, message, caption, style)
 
     def on_convert(self):
         """打开动画转换器"""
-        dialog = dialogs.AnimationConverterDialog(self.parent)
+        dialog = dialogs.AnimationConverterDialog(self.parent_widget)
         dialog.exec()
 
 
@@ -97,7 +97,7 @@ class AppendMenu(QMenu):
     """右键菜单 - 添加图像"""
     def __init__(self, parent, path, frames, id_replace):
         super().__init__(parent)
-        self.parent = parent
+        self.parent_widget = parent
         self.path = path
         self.frames = frames
         self.id_replace = id_replace
@@ -139,7 +139,7 @@ class AppendMenu(QMenu):
 
     def on_transparent(self):
         """打开透明色选择对话框"""
-        dialog = dialogs.SelectColorDialog(self.parent, self.path, self.frames)
+        dialog = dialogs.SelectColorDialog(self.parent_widget, self.path, self.frames)
         result = dialog.exec()
         if result != QDialog.DialogCode.Accepted:
             return
@@ -207,7 +207,7 @@ class ComponentMenu(QMenu):
     """组件右键菜单"""
     def __init__(self, parent, id_image):
         super().__init__(parent)
-        self.parent = parent
+        self.parent_widget = parent
         self.id_image = id_image
 
         menu_replace = QAction(_("交換"), self)
@@ -229,20 +229,20 @@ class ComponentMenu(QMenu):
 
     def on_replace(self):
         """替换图像"""
-        dialog = dialogs.ImageSelectDialog(self.parent, _("画像交換ダイアログ"), self.id_image)
+        dialog = dialogs.ImageSelectDialog(self.parent_widget, _("画像交換ダイアログ"), self.id_image)
         result = dialog.exec()
         if result != QDialog.DialogCode.Accepted:
             return
 
         path_image, frames, id_replace = dialog.get_select_image()
-        qtlib.post_append(self.parent, path_image, frames, id_replace)
+        qtlib.post_append(self.parent_widget, path_image, frames, id_replace)
 
     def on_clipper(self):
         """打开裁剪器设置"""
-        dialog = dialogs.ClipperSelectDialog(self.parent, self.id_image)
+        dialog = dialogs.ClipperSelectDialog(self.parent_widget, self.id_image)
         dialog.exec()
 
     def on_remove(self):
         """删除图像"""
         CONFIG.manager.remove(self.id_image)
-        qtlib.post_update(self.parent, True, True, True)
+        qtlib.post_update(self.parent_widget, True, True, True)

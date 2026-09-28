@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# 虚拟环境/venv
+venv/
+.venv/
+env/
+ENV/
+
+# PyInstaller/Nuitka
+*.spec
+*.onefile-build/
+*.dist/
+
+# 编辑器/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统/System
+.DS_Store
+Thumbs.db
+
+# 项目特定：外部资源（见 PACKAGING.md）
+Material/

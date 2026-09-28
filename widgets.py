@@ -1173,7 +1173,7 @@ class ThumbnailPanel(QScrollArea):
 
     def __init__(self, parent, path, on_dialog):
         super().__init__(parent)
-        self.parent = parent
+        self.parent_widget = parent
         self.path = path
         self.on_dialog = on_dialog
         self.errors = []
@@ -1392,14 +1392,14 @@ class ThumbnailPanel(QScrollArea):
     def on_click_left(self, path, frames=None):
         def inner():
             if path.is_dir():
-                qtlib.post_select(self.parent, path)
+                qtlib.post_select(self.parent_widget, path)
                 return
             qtlib.post_append(self.window(), path_image=path, frames=frames)
         return inner
 
     def on_click_right(self, path, frames):
         def inner(pos):
-            menu = menus.AppendMenu(self.parent, path, frames, None)
+            menu = menus.AppendMenu(self.parent_widget, path, frames, None)
             menu.exec(self.mapToGlobal(pos))
         return inner
 

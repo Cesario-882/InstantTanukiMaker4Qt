@@ -16,7 +16,7 @@ i18n and cross-platform compatibility (including GNU/Linux).
 ### 依赖
 
 - Python 3.10+
-- 运行依赖见 `requirements.txt`
+- 运行依赖见 `requirements.txt`（大致范围）或 `requirements-freeze.txt`（如需复现）
   （主要依赖：PySide6、Pillow、numpy、opencv-python、natsort）
 
 ### 安装
@@ -30,16 +30,16 @@ pip install -r requirements.txt
 ### 运行
 
 ```bash
-python3 main.py
+./main.py
 ```
 
 ### 打包
 
-`Material` 与 `locale` 需外置，不随包分发。详见 [PACKAGING.md](./PACKAGING.md)。
+`Material` 与 `locale` 需外置，不随包分发。详见 [打包须知.md](./打包须知.md)。
 
 ### License
 
-本项目采用 GPL 许可，详见 [LICENSE](./LICENSE)。
+本项目采用 GPL v3 许可，详见 [LICENSE](./LICENSE)。
 
 ---
 
@@ -49,7 +49,8 @@ python3 main.py
 ### Dependencies
 
 - Python 3.10+
-- Runtime dependencies: see `requirements.txt`
+- Runtime dependencies: see `requirements.txt` (approximate range) or
+  `requirements-freeze.txt` (for exact reproduction)
   (main: PySide6, Pillow, numpy, opencv-python, natsort)
 
 ### Install
@@ -63,7 +64,7 @@ pip install -r requirements.txt
 ### Run
 
 ```bash
-python3 main.py
+./main.py
 ```
 
 ### Packaging
@@ -73,4 +74,4 @@ See [PACKAGING.md](./PACKAGING.md) for details.
 
 ### License
 
-Licensed under GPL. See [LICENSE](./LICENSE).
+Licensed under GPL v3. See [LICENSE](./LICENSE).

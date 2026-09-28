@@ -154,7 +154,7 @@ class SelectColorDialog(QDialog):
         self.setModal(True)
         self.resize(800, 700)
 
-        self.parent = parent
+        self.parent_widget = parent
 
         # 加载目标图像
         self.im_target = (editor.open_image(path_image).convert("RGBA") if not frames else
@@ -347,7 +347,7 @@ class AnimationConverterDialog(QDialog):
         self.setWindowTitle(_("アニメーションコンバータ"))
         self.setModal(True)
         self.resize(600, 400)
-        self.parent = parent
+        self.parent_widget = parent
 
         # 主布局
         layout = QVBoxLayout(self)
@@ -450,14 +450,14 @@ class AnimationConverterDialog(QDialog):
             return
 
         duration = self.spin_duration.value()
-        qtlib.post_start_progress(self.parent, "しばらくお待ちください…", _("アニメーション画像作成中"))
+        qtlib.post_start_progress(self.parent_widget, "しばらくお待ちください…", _("アニメーション画像作成中"))
         thread_connect = threading.Thread(target=self.connect_animation,
                                           args=(frames, path_save, duration))
         thread_connect.start()
 
     def connect_animation(self, frames, path_save, duration):
         """连接动画（线程）"""
-        with qtlib.progress_context(self.parent, _("アニメーション画像の作成に失敗しました…"), _("作成失敗")):
+        with qtlib.progress_context(self.parent_widget, _("アニメーション画像の作成に失敗しました…"), _("作成失敗")):
             if path_save.suffix == ".gif":
                 editor.save_gif(path_save, frames, duration)
             else:
@@ -466,7 +466,7 @@ class AnimationConverterDialog(QDialog):
             caption = _("作成完了") if frames else _("フォルダ内画像なし")
             message = _("アニメーション画像の作成が完了しました！") if frames else _("フォルダ内に画像がありません！")
             style = QMessageBox.Icon.Information if frames else QMessageBox.Icon.Warning
-            qtlib.post_end_progress(self.parent, message, caption, style,
+            qtlib.post_end_progress(self.parent_widget, message, caption, style,
                                     path_open=path_save.parent)
 
     def on_separate(self):
@@ -490,14 +490,14 @@ class AnimationConverterDialog(QDialog):
         trim = self.check_trim.isChecked()
         area_omit = self.spin_omit.value()
 
-        qtlib.post_start_progress(self.parent, "しばらくお待ちください…", _("画像分割中"))
+        qtlib.post_start_progress(self.parent_widget, "しばらくお待ちください…", _("画像分割中"))
         thread_separate = threading.Thread(target=self.separate_animation,
                                            args=(folder_save, frames, sep_parts, trim, area_omit))
         thread_separate.start()
 
     def separate_animation(self, folder_save, frames, sep_parts, trim, area_omit):
         """分解动画（线程）"""
-        with qtlib.progress_context(self.parent, _("画像の分割に失敗しました…"), _("分割失敗")):
+        with qtlib.progress_context(self.parent_widget, _("画像の分割に失敗しました…"), _("分割失敗")):
             if sep_parts:
                 editor.save_png_sequence_contour(folder_save, frames, trim, area_omit)
             else:
@@ -505,4 +505,4 @@ class AnimationConverterDialog(QDialog):
 
             message = _("画像の分割が完了しました！")
             caption = _("分割完了")
-            qtlib.post_end_progress(self.parent, message, caption, path_open=folder_save)
+            qtlib.post_end_progress(self.parent_widget, message, caption, path_open=folder_save)
