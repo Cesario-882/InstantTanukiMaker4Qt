@@ -1,0 +1,198 @@
+name: Build with Nuitka
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: windows
+            entry: main.py
+          - os: ubuntu-latest
+            artifact: linux
+            entry: main.py
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---------- 解析 platform_tag ----------
+      - name: Resolve platform tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            . /etc/os-release
+            echo "tag=linux-ubuntu${VERSION_ID}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ runner.os }}" == "Windows" ]]; then
+            echo "tag=win-x64" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=unknown" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-freeze.txt
+          pip install nuitka ordered-set zstandard
+
+      - name: Install Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            patchelf ccache zstd \
+            libgl1 libegl1 libxkbcommon-x11-0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-xinerama0 libxcb-cursor0
+
+      - name: Verify dirs
+        shell: bash
+        run: |
+          test -d Data     || (echo "缺少 ./Data 目录"     && exit 1)
+          test -d Material || (echo "缺少 ./Material 目录" && exit 1)
+          test -d 添加     || (echo "缺少 ./添加 目录"     && exit 1)
+          test -d locale   || (echo "缺少 ./locale 目录"   && exit 1)
+
+      # ---------- Nuitka 打包 ----------
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m nuitka `
+            --standalone `
+            --assume-yes-for-downloads `
+            --enable-plugin=pyside6 `
+            --include-package=numpy `
+            --include-package=cv2 `
+            --include-package=PIL `
+            --include-package=natsort `
+            --include-data-dir=Data=Data `
+            --windows-console-mode=disable `
+            --windows-icon-from-ico=Data/Image/Icon/Widget/Instant.ico `
+            --output-dir=build `
+            --output-filename=InstantTanukiMaker.exe `
+            ${{ matrix.entry }}
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          python -m nuitka \
+            --standalone \
+            --assume-yes-for-downloads \
+            --enable-plugin=pyside6 \
+            --include-package=numpy \
+            --include-package=cv2 \
+            --include-package=PIL \
+            --include-package=natsort \
+            --include-data-dir=Data=Data \
+            --output-dir=build \
+            --output-filename=InstantTanukiMaker \
+            ${{ matrix.entry }}
+
+      - name: Normalize binary name (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          if [ -f build/main.dist/InstantTanukiMaker.bin ]; then
+            mv build/main.dist/InstantTanukiMaker.bin build/main.dist/InstantTanukiMaker
+          fi
+
+      # ---------- 完整包 ----------
+      - name: Package full (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package_full | Out-Null
+          Copy-Item -Recurse -Force build/main.dist package_full/
+          Copy-Item -Recurse -Force Material          package_full/Material
+          Copy-Item -Recurse -Force 添加              package_full/添加
+          Copy-Item -Recurse -Force locale            package_full/locale
+          Compress-Archive -Path package_full/* `
+            -DestinationPath "InstantTanukiMaker.${{ steps.tag.outputs.tag }}.zip" -Force
+
+      - name: Package full (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p package_full
+          cp -r build/main.dist package_full/
+          cp -r Material         package_full/Material
+          cp -r 添加             package_full/添加
+          cp -r locale           package_full/locale
+          tar -C package_full -cf - . | \
+            zstd -19 -T0 -o "InstantTanukiMaker.${{ steps.tag.outputs.tag }}.tar.zst"
+
+      # ---------- 替换包（只 main.dist/） ----------
+      - name: Package replace (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package_replace | Out-Null
+          Copy-Item -Recurse -Force build/main.dist package_replace/
+          Compress-Archive -Path package_replace/* `
+            -DestinationPath "InstantTanukiMaker.${{ steps.tag.outputs.tag }}.replace.zip" -Force
+
+      - name: Package replace (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p package_replace
+          cp -r build/main.dist package_replace/
+          tar -C package_replace -cf - . | \
+            zstd -19 -T0 -o "InstantTanukiMaker.${{ steps.tag.outputs.tag }}.replace.tar.zst"
+
+      # ---------- Artifacts ----------
+      - name: Upload full (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-full
+          path: InstantTanukiMaker.${{ steps.tag.outputs.tag }}.zip
+
+      - name: Upload replace (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-replace
+          path: InstantTanukiMaker.${{ steps.tag.outputs.tag }}.replace.zip
+
+      - name: Upload full (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-full
+          path: InstantTanukiMaker.${{ steps.tag.outputs.tag }}.tar.zst
+
+      - name: Upload replace (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-replace
+          path: InstantTanukiMaker.${{ steps.tag.outputs.tag }}.replace.tar.zst
+
+      # ---------- Release ----------
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            InstantTanukiMaker.*.zip
+            InstantTanukiMaker.*.tar.zst
+          fail_on_unmatched_files: false
