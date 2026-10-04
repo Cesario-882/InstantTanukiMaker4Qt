@@ -35,7 +35,7 @@ pip install -r requirements.txt
 
 ### 打包
 
-`Material` 与 `locale` 需外置，不随包分发。详见 [打包须知.md](./打包须知.md)。
+`Material` 与 `添加` 、`locale`需外置，不随包分发。详见 [打包须知.md](./打包须知.md)。
 
 ### License
 
@@ -69,7 +69,7 @@ pip install -r requirements.txt
 
 ### Packaging
 
-`Material` and `locale` must be kept external and are not bundled.
+`Material` and `添加`, `locale`  must be kept external and are not bundled.
 See [PACKAGING.md](./PACKAGING.md) for details.
 
 ### License
