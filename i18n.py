@@ -12,6 +12,7 @@ _current: Dict[str, str] = {}
 _current_lang: str = "en"
 _uma_table: Dict[str, str] = {}
 _tag_table: Dict[str, str] = {}
+_alias_table: Dict[str, str] = {}
 
 
 # ===== 回退链 =====
@@ -34,16 +35,15 @@ def _resolve_chain(lang: str) -> list:
 
 # ===== 路径 =====
 def _find_locale_dir() -> pathlib.Path:
-    if hasattr(sys, "_MEIPASS"):
-        external = pathlib.Path(sys.executable).resolve().parent / "locale"
-        internal = pathlib.Path(sys._MEIPASS) / "locale"
-    else:
-        external = pathlib.Path(__file__).resolve().parent / "locale"
-        internal = external
-    return external if external.exists() else internal
+    """locale 目录：仅外置，与可执行文件（或脚本）同级"""
+    if hasattr(sys, "_MEIPASS") or "__compiled__" in globals():
+        # 打包后（PyInstaller / Nuitka）：exe 所在目录
+        return pathlib.Path(sys.executable).resolve().parent / "locale"
+    # 开发环境：脚本所在目录
+    return pathlib.Path(__file__).resolve().parent / "locale"
 
 
-LOCALE_DIR = str(_find_locale_dir())
+LOCALE_DIR = _find_locale_dir()
 
 
 # ===== 系统语言 =====
@@ -55,7 +55,7 @@ def get_system_language() -> str:
         if lang_env:
             lang_code = lang_env.split('.')[0]
         else:
-            lang_code = locale.getdefaultlocale()[0] or 'en'
+            lang_code = locale.getlocale()[0] or 'en'
     except Exception:
         lang_code = 'en'
 
@@ -71,13 +71,13 @@ def get_system_language() -> str:
 
 
 # ===== 加载 =====
-def _load_json_table(path: str) -> Dict[str, str]:
-    if not os.path.exists(path):
-        return {}
+def _load_json_table(path: pathlib.Path) -> Dict[str, str]:
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError) as e:
+    except FileNotFoundError:
+        return {}
+    except (json.JSONDecodeError, OSError) as e:
         logging.warning(f"Failed to load {path}: {e}")
         return {}
 
@@ -85,7 +85,7 @@ def _load_json_table(path: str) -> Dict[str, str]:
 def _load_by_chain(chain: list, *subdirs: str) -> Dict[str, str]:
     """按回退链找第一个非空文件。subdirs 是 locale 下的子目录，如 ('uma',)"""
     for try_lang in chain:
-        path = os.path.join(LOCALE_DIR, *subdirs, f"{try_lang}.json")
+        path = LOCALE_DIR.joinpath(*subdirs, f"{try_lang}.json")
         data = _load_json_table(path)
         if data:
             return data
@@ -209,6 +209,9 @@ def display(jp_text: str) -> str:
 def get_current_language() -> str:
     return _current_lang
 
+def get_alias_table() -> Dict[str, str]:
+    """目录名映射表包含于（locale/{lang}.json），目前仅中文用户有内容，其他语言可能为原文"""
+    return dict(_current)
 
 def get_all_keys() -> list:
     return list(_current.keys())
@@ -224,6 +227,5 @@ def has_key(key: str) -> bool:
 
 def add_translation(key: str, value: str) -> None:
     _current[key] = value
-
 
 load_language()

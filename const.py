@@ -7,7 +7,7 @@ import numpy as np
 from PySide6.QtGui import QImage, QFontDatabase
 
 
-VERSION = "1.0"
+VERSION = "1.0" # 随便填的，删掉之前记得调查引用
 
 # ===== 图像逻辑尺寸（影响合成结果，不要为了 UI 随便改）=====
 DEFAULT_SIZE = (500, 500)
@@ -121,32 +121,32 @@ THRESHOLD_CONVERT_SINGLE = 0.25
 
 
 # ===== フォルダパス =====
-
 def _find_base_dir():
     """程序内部资源目录（打包后为 _MEIPASS，开发时为脚本目录）"""
     if hasattr(sys, "_MEIPASS"):
+        # PyInstaller
         return pathlib.Path(sys._MEIPASS)
-    return pathlib.Path(__file__).resolve().parent
+    elif "__compiled__" in globals():
+        # Nuitka（standalone）
+        return pathlib.Path(sys.executable).resolve().parent
+    else:
+        # 开发环境
+        return pathlib.Path(__file__).resolve().parent
 
 
 def _find_external_dir():
     """程序外部资源目录（用户可见、可修改）"""
-    if hasattr(sys, "_MEIPASS"):
+    if hasattr(sys, "_MEIPASS") or "__compiled__" in globals():
+        # 打包后（PyInstaller / Nuitka）：exe 所在目录
         return pathlib.Path(sys.executable).resolve().parent
-    return pathlib.Path(__file__).resolve().parent
+    else:
+        # 开发环境
+        return pathlib.Path(__file__).resolve().parent
 
 
 def _find_material_dir():
-    """Material 目录：外部优先，内部兜底"""
-    candidates = [
-        _external_dir / "Material",
-        _external_dir / "Data" / "Image" / "Material",
-        _base_dir / "Data" / "Image" / "Material",
-    ]
-    for c in candidates:
-        if c.exists():
-            return c
-    return candidates[0]
+    """Material 目录：仅外置，与可执行文件（或脚本）同级"""
+    return _external_dir / "Material"
 
 
 _base_dir = _find_base_dir()
@@ -165,8 +165,27 @@ FOLDER_FONT = FOLDER_DATA / "Font"
 FOLDER_MATERIAL = _find_material_dir()
 FOLDER_BASE = FOLDER_MATERIAL / ImageType.BASE
 
-FOLDER_APPEND = _external_dir / "Material"
-FOLDER_APPEND_BUTTON = FOLDER_APPEND / "Folder"
+FOLDER_APPEND = _external_dir / "添加"
+FOLDER_APPEND_BUTTON = FOLDER_MATERIAL / "Folder"
+
+
+FOLDER_LOCALE = _external_dir / "locale"
+
+
+# ===== 目录别名（Material 日文名 → 添加 中文名）=====
+def _load_alias_map() -> dict:
+    """目录名映射。
+    注：目前 i18n._alias_table 实际返回整个 UI 文案表（含 9 条目录映射）
+    只用 TYPES_IMAGE 里的 key 查表，其余 key 冗余无副作用
+    """
+    try:
+        import i18n
+        return i18n.get_alias_table()
+    except ImportError:
+        return {}
+
+
+DIC_ALIAS = _load_alias_map()
 
 
 # ===== ウィジェットアイコン =====

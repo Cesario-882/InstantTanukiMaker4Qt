@@ -24,7 +24,6 @@ from i18n import _, display
 
 # ===== 图像显示组件 =====
 class BitmapPanel(QWidget):
-    """图像显示组件 - PySide6 版本"""
     def __init__(self, parent=None, pil_image=None, path_file=None, qimage=None):
         super().__init__(parent)
 
@@ -1272,6 +1271,25 @@ class ThumbnailPanel(QScrollArea):
             widget = self._create_item_widget(path_image, pil_image, frames)
             self.layout.addWidget(widget, row, col)
 
+    def _tooltip_for(self, path_image) -> str:
+        """目录：若名字含'行'，列出该目录下所有素材名（翻译后）；
+        其他目录显示目录名翻译；文件显示文件名翻译。"""
+        if not path_image.is_dir():
+            return const.DIC_ALIAS.get(path_image.stem, display(path_image.stem))
+
+        # 目录
+        if "行" in path_image.stem:
+            lines = ["存在的角色素材:"]
+            try:
+                for entry in sorted(path_image.iterdir()):
+                    lines.append("    " + display(entry.stem))
+            except OSError:
+                pass
+            return "\n".join(lines)
+
+        # 其他目录
+        return const.DIC_ALIAS.get(path_image.stem, display(path_image.stem))
+
     def _create_item_widget(self, path_image, pil_image, frames):
         widget = QWidget()
         widget.setFixedSize(self.CELL_WIDTH, self.CELL_HEIGHT)
@@ -1283,7 +1301,7 @@ class ThumbnailPanel(QScrollArea):
         pixmap = self.pil_to_qpixmap(pil_image)
         btn.setIcon(QIcon(pixmap))
         btn.setIconSize(QSize(*self.ICON_SIZE))
-        btn.setToolTip(display(path_image.stem))
+        btn.setToolTip(self._tooltip_for(path_image))
         btn.setFixedSize(*self.ICON_SIZE)
         btn.clicked.connect(self.on_click_left(path_image, frames))
 
@@ -1291,7 +1309,7 @@ class ThumbnailPanel(QScrollArea):
             btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             btn.customContextMenuRequested.connect(self.on_click_right(path_image, frames))
 
-        label = QLabel(display(path_image.stem))
+        label = QLabel(const.DIC_ALIAS.get(path_image.stem, display(path_image.stem)))
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setFixedSize(*self.CAPTION_SIZE)
         label.setWordWrap(True)
@@ -1438,7 +1456,7 @@ class ImageAppendPanel(QWidget):
                 btn = QPushButton()
                 btn.setIcon(QIcon(pixmap))
                 btn.setIconSize(QSize(50, 50))
-                btn.setToolTip(parts)
+                btn.setToolTip(const.DIC_ALIAS.get(parts, display(parts)))
                 btn.setFixedSize(54, 54)
                 folder_parts = const.FOLDER_MATERIAL / parts
                 btn.clicked.connect(self.on_select_btn(folder_parts))
