@@ -90,7 +90,7 @@ jobs:
 
       # ---------- PyInstaller 打包 ----------
       - name: Build
-        run: pyinstaller --noconfirm main.spec
+        run: pyinstaller --noconfirm InstantTanukiMaker.spec
 
       # ---------- 拷外置目录到产物旁 ----------
       - name: Stage external dirs (Windows)
