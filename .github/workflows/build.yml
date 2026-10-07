@@ -3,7 +3,9 @@ name: Build with PyInstaller
 on:
   push:
     branches: [ main, master ]
-    tags: [ 'v*' ]
+    tags:
+      - 'Test-*'
+      - 'Stable-*'
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
@@ -40,13 +42,13 @@ jobs:
           fi
           cat "$GITHUB_OUTPUT"
 
-      # ---------- 从 Test-1.9 Release 拉 Material ----------
+      # ---------- 从 assets Release 拉 Material ----------
       - name: Download Material
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release download Test-1.9 \
+          gh release download assets \
             --repo Cesario-882/InstantTanukiMaker4Qt \
             --pattern "Material.tar.zst" \
             --clobber
@@ -82,7 +84,7 @@ jobs:
       - name: Verify dirs
         shell: bash
         run: |
-          test -f InstantTanukiMaker.spec || (echo "缺少 main.spec" && exit 1)
+          test -f main.spec || (echo "缺少 main.spec" && exit 1)
           test -d Data     || (echo "缺少 ./Data"     && exit 1)
           test -d Material || (echo "缺少 ./Material" && exit 1)
           test -d 添加     || (echo "缺少 ./添加"     && exit 1)
@@ -90,7 +92,7 @@ jobs:
 
       # ---------- PyInstaller 打包 ----------
       - name: Build
-        run: pyinstaller --noconfirm InstantTanukiMaker.spec
+        run: pyinstaller --noconfirm main.spec
 
       # ---------- 拷外置目录到产物旁 ----------
       - name: Stage external dirs (Windows)
@@ -124,7 +126,7 @@ jobs:
           tar -C dist/InstantTanukiMaker -cf - . | \
             zstd -19 -T0 -o "InstantTanukiMaker.${{ steps.tag.outputs.tag }}.tar.zst"
 
-      # ---------- 替换包（只 exe + ELF_requirements/） ----------
+      # ---------- 替换包 ----------
       - name: Package replace (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -176,10 +178,11 @@ jobs:
 
       # ---------- Release ----------
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/Test-') || startsWith(github.ref, 'refs/tags/Stable-')
         uses: softprops/action-gh-release@v2
         with:
           files: |
             InstantTanukiMaker.*.zip
             InstantTanukiMaker.*.tar.zst
           fail_on_unmatched_files: false
+          prerelease: ${{ contains(github.ref, 'Test-') }}

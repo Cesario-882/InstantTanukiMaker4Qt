@@ -24,8 +24,3 @@ ENV/
 # 系统/System
 .DS_Store
 Thumbs.db
-
-# 项目特定：外部资源（见 PACKAGING.md）
-Material/
-Material.tar.zst
-Material.zip
