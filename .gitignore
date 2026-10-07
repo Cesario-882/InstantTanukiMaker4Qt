@@ -14,11 +14,6 @@ venv/
 env/
 ENV/
 
-# PyInstaller/Nuitka
-*.spec
-*.onefile-build/
-*.dist/
-
 # 编辑器/IDE
 .vscode/
 .idea/
