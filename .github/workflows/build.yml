@@ -82,7 +82,7 @@ jobs:
       - name: Verify dirs
         shell: bash
         run: |
-          test -f main.spec || (echo "缺少 main.spec" && exit 1)
+          test -f InstantTanukiMaker.spec || (echo "缺少 main.spec" && exit 1)
           test -d Data     || (echo "缺少 ./Data"     && exit 1)
           test -d Material || (echo "缺少 ./Material" && exit 1)
           test -d 添加     || (echo "缺少 ./添加"     && exit 1)
