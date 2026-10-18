@@ -210,7 +210,7 @@ def get_current_language() -> str:
     return _current_lang
 
 def get_alias_table() -> Dict[str, str]:
-    """目录名映射表包含于（locale/{lang}.json），目前仅中文用户有内容，其他语言可能为原文"""
+    """目录名映射表包含于（locale/zh_CN.json），仅中文用户有内容"""
     return dict(_current)
 
 def get_all_keys() -> list:

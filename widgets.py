@@ -225,7 +225,6 @@ class PlayingStatusPanel(QWidget):
         self.panel_pause.label.setToolTip(_("再生"))
         self.panel_pause.label.mousePressEvent = self.on_play
 
-        # 动画标签（用于GIF播放）
         self.anim_label = QLabel()
         self.anim_label.setToolTip(_("停止"))
         self.anim_label.hide()
@@ -252,16 +251,10 @@ class PlayingStatusPanel(QWidget):
     def play(self):
         self.panel_pause.hide()
         self.anim_label.show()
-        # TODO: 加载并播放GIF动画
-        # self.movie = QMovie(str(const.PATH_PLAYING))
-        # self.anim_label.setMovie(self.movie)
-        # self.movie.start()
 
     def pause(self):
         self.anim_label.hide()
         self.panel_pause.show()
-        # if hasattr(self, 'movie') and self.movie:
-        #     self.movie.stop()
 
 
 # ===== 头部面板 =====

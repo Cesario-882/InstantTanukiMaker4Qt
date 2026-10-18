@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import sys
-import os
 import pathlib
 import threading
 import numpy as np
@@ -13,7 +12,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer, QUrl, QMimeData, QSocketNotifier
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QIcon, QAction, QDesktopServices
-from PySide6.QtCore import Signal, QObject
 
 import const
 from config import CONFIG

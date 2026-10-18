@@ -163,42 +163,25 @@ def progress_context(target_post, message, caption):
 
 
 # ===== 进度对话框类 =====
-
 class ProgressDialog:
-    """PySide6 版本的进度对话框"""
+    """进度对话框"""
     def __init__(self, title, message, parent=None):
-        # 创建进度对话框
         self.dialog = QProgressDialog(message, None, 0, 0, parent)
         self.dialog.setWindowTitle(title)
         self.dialog.setWindowModality(Qt.WindowModality.WindowModal)
         self.dialog.setMinimumDuration(0)
         self.dialog.setAutoClose(True)
         self.dialog.setAutoReset(True)
-        # 移除取消按钮（或设置为 None）
         self.dialog.setCancelButton(None)
 
     def Pulse(self):
-        """脉冲进度（不确定进度）"""
-        # 设置一个非零值显示进度条动画
         self.dialog.setValue(1)
 
     def Destroy(self):
-        """关闭对话框"""
         self.dialog.close()
         self.dialog.deleteLater()
 
-    def Update(self, value, new_label=None):
-        """更新进度值"""
-        self.dialog.setValue(value)
-        if new_label:
-            self.dialog.setLabelText(new_label)
-        return True, value
-
-    def Raise(self):
-        """将对话框提到前面"""
+    def Show(self):
+        self.dialog.show()
         self.dialog.raise_()
         self.dialog.activateWindow()
-
-    def Show(self):
-        """显示对话框"""
-        self.dialog.show()
