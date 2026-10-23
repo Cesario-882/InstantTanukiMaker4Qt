@@ -15,7 +15,7 @@ i18n and cross-platform compatibility (including GNU/Linux).
 
 ### 依赖
 
-- Python 3.10+
+- Python 3.14+
 - 运行依赖见 `requirements.txt`（大致范围）或 `requirements-freeze.txt`（如需复现）
   （主要依赖：PySide6、Pillow、numpy、opencv-python、natsort）
 
@@ -48,7 +48,7 @@ pip install -r requirements.txt
 
 ### Dependencies
 
-- Python 3.10+
+- Python 3.14+
 - Runtime dependencies: see `requirements.txt` (approximate range) or
   `requirements-freeze.txt` (for exact reproduction)
   (main: PySide6, Pillow, numpy, opencv-python, natsort)
