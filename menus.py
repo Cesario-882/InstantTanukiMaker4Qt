@@ -123,7 +123,7 @@ class MenuBar(QMenuBar):
 
     def on_export_archive(self):
         path_out = qtlib.save_file(
-            None, _("素材庫の書き出し"), "*.tzst", _("tanukora_素材庫.tzst"))
+            None, _("素材庫の書き出し"), "*.tzst", _("tanukora_Material.tzst"))
         if not path_out:
             return
         if path_out.suffix.lower() != const.EXT_ARCHIVE:

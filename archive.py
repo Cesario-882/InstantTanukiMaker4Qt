@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Tanukora Zstd/Tar Archive (.tzst) 导入导出。"""
+"""Tanukora Mateial Archive (.tzst) 导入导出。"""
 from __future__ import annotations
 
 import os
