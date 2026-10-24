@@ -1,3 +1,18 @@
+# Copyright (C) 2026 Cesario-882
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import numpy as np
 import threading
 from pathlib import Path
@@ -1272,7 +1287,7 @@ class ThumbnailPanel(QScrollArea):
 
         # 目录
         if "行" in path_image.stem:
-            lines = ["存在的角色素材:"]
+            lines = [_("存在的角色素材:")]
             try:
                 for entry in sorted(path_image.iterdir()):
                     lines.append("    " + display(entry.stem))

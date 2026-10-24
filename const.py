@@ -1,3 +1,18 @@
+# Copyright (C) 2026 Cesario-882
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import sys
 import pathlib
 from dataclasses import dataclass, fields
@@ -7,7 +22,7 @@ import numpy as np
 from PySide6.QtGui import QImage, QFontDatabase
 
 
-VERSION = "1.0" # 随便填的，删掉之前记得调查引用
+VERSION = "3.0.1" # 随便填的，删掉之前记得调查引用
 
 # ===== 图像逻辑尺寸（影响合成结果，不要为了 UI 随便改）=====
 DEFAULT_SIZE = (500, 500)
@@ -170,6 +185,23 @@ FOLDER_APPEND_BUTTON = FOLDER_MATERIAL / "Folder"
 
 
 FOLDER_LOCALE = _external_dir / "locale"
+
+
+# ===== アーカイブ (.tzst) =====
+EXT_ARCHIVE = ".tzst"
+ARCHIVE_ZSTD_LEVEL = 19
+ARCHIVE_MEMBER_LIMIT = 256 * 1024 * 1024   # 单文件 256 MiB
+ARCHIVE_TOTAL_LIMIT = 20 * 1024 * 1024 * 1024   # 总量 20 GiB
+
+# 打包对象：Material 与 添加，以及 locale 下的 uma 文件夹
+ARCHIVE_ROOTS = ["Material", "添加", "locale/uma"]
+ARCHIVE_FOLDERS = [
+    FOLDER_MATERIAL,
+    FOLDER_APPEND,
+    FOLDER_LOCALE / "uma"
+]
+# 运行时产物，不打包/不覆盖
+ARCHIVE_EXCLUDE = {"Material/preview.gif"}
 
 
 # ===== 目录别名（Material 日文名 → 添加 中文名）=====

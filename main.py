@@ -1,6 +1,22 @@
 #!/usr/bin/env python
+# Copyright (C) 2026 Cesario-882
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 
 import sys
+import os
 import pathlib
 import threading
 import numpy as np
@@ -293,6 +309,12 @@ class MainWindow(QMainWindow):
             CONFIG.manager.save_preview(is_single)
             qtlib.post_end_progress(self, need_play=True)
 
+    def request_force_quit(self):
+        """强制退出（跳过关窗确认），供导入后重启等场景调用。"""
+        self._force_quit = True
+        self.close()
+        QApplication.instance().quit()
+
     def closeEvent(self, event):
         """关闭事件"""
         if self._force_quit:
@@ -321,9 +343,19 @@ def main():
     # ===== 信号处理 =====
     def _on_signal(signum, frame):
         print(f"\n[signal] received {signum}, shutting down...", flush=True)
-        window._force_quit = True   # ← 信号来时设 True
-        window.close()              # ← 触发 closeEvent，看到 True 直接退
+        window.request_force_quit()
         app.quit()
+        # 如果 Qt 没退干净，直接物理超度
+        os._exit(1)
+
+    # ===== 全局异常闪退拦截 =====
+    def _excepthook(exc_type, exc_value, exc_traceback):
+        # 打印报错栈供调试，但不弹窗，直接强杀
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        print("\n[unhandled exception] Force quitting...", flush=True)
+        _on_signal(-1, None)
+
+    sys.excepthook = _excepthook
 
     signal.signal(signal.SIGINT, _on_signal)
     if sys.platform != "win32":

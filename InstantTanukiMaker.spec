@@ -1,12 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('Data', 'Data')],
-    hiddenimports=[],
+    datas=[('Data', 'Data')],  # 保持原样，不打包 locale
+    hiddenimports=['zstandard', 'zstandard.backend_c', 'zstandard.backend_cffi'], # 加上这行！
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -26,7 +25,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,
+    console=False, # 发布时记得保持 False
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

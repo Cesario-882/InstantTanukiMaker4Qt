@@ -1,10 +1,27 @@
+# Copyright (C) 2026 Cesario-882
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import threading
+import time
 from PySide6.QtWidgets import (
     QMenuBar, QMenu, QWidget, QMessageBox, QDialog
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QAction
 
+import const
 from config import CONFIG
 import dialogs
 import editor
@@ -30,6 +47,16 @@ class MenuBar(QMenuBar):
         menu_load.setToolTip(_("pkl形式のファイルから作業状況を読み込みます。"))
         menu_load.triggered.connect(self.on_load)
         menu_file.addAction(menu_load)
+
+        menu_export_archive = QAction(_("素材庫を書き出す (.tzst)"), self)
+        menu_export_archive.setToolTip(_("Materialフォルダと添加フォルダを1つの.tzstにまとめます。"))
+        menu_export_archive.triggered.connect(self.on_export_archive)
+        menu_file.addAction(menu_export_archive)
+
+        menu_import_archive = QAction(_("素材庫を読み込む (.tzst)"), self)
+        menu_import_archive.setToolTip(_(".tzstを展開してMaterialフォルダと添加フォルダに反映します。"))
+        menu_import_archive.triggered.connect(self.on_import_archive)
+        menu_file.addAction(menu_import_archive)
 
         self.addMenu(menu_file)
 
@@ -92,6 +119,133 @@ class MenuBar(QMenuBar):
         dialog = dialogs.AnimationConverterDialog(self.parent_widget)
         dialog.exec()
 
+    # ===== 素材庫アーカイブ =====
+
+    def on_export_archive(self):
+        path_out = qtlib.save_file(
+            None, _("素材庫の書き出し"), "*.tzst", _("tanukora_素材庫.tzst"))
+        if not path_out:
+            return
+        if path_out.suffix.lower() != const.EXT_ARCHIVE:
+            path_out = path_out.with_suffix(const.EXT_ARCHIVE)
+
+        qtlib.post_start_progress(self.parent_widget, _("少しお待ちください…"),
+                                  _("素材庫を書き出し中"))
+        threading.Thread(target=self._export_archive, args=(path_out,),
+                         daemon=True).start()
+
+    def _export_archive(self, path_out):
+        import archive
+        start_time = time.perf_counter()
+
+        try:
+            archive.export_archive(path_out)
+        except archive.ArchiveError as e:
+            qtlib.post_end_progress(self.parent_widget,
+                                    _(e.message_key).format(**e.kwargs),
+                                    _("素材庫の書き出し失敗"),
+                                    QMessageBox.Icon.Critical)
+            return
+        except Exception as e:
+            qtlib.post_end_progress(self.parent_widget,
+                                    _("素材庫の書き出しに失敗しました…") + f"\n{e}",
+                                    _("素材庫の書き出し失敗"),
+                                    QMessageBox.Icon.Critical)
+            return
+
+        elapsed = time.perf_counter() - start_time
+        try:
+            size_mb = path_out.stat().st_size / (1024 * 1024)
+            size_text = f"{size_mb:.2f} MB"
+        except Exception:
+            size_text = "不明"
+
+        message = _("素材庫の書き出しが完了しました！\n\n"
+                    "ファイルサイズ: {size}\n"
+                    "処理時間: {time:.2f} 秒").format(size=size_text, time=elapsed)
+
+        qtlib.post_end_progress(self.parent_widget,
+                                message,
+                                _("素材庫の書き出し完了"),
+                                QMessageBox.Icon.Information,
+                                path_out.parent)
+
+    def on_import_archive(self):
+        path_in = qtlib.select_file(None, _("素材庫の読み込み"), "*.tzst")
+        if not path_in:
+            return
+
+        overwrite = self._ask_import_mode()
+        if overwrite is None:
+            return
+
+        qtlib.post_start_progress(self.parent_widget, _("少しお待ちください…"),
+                                  _("素材庫を読み込み中"))
+        threading.Thread(target=self._import_archive, args=(path_in, overwrite),
+                         daemon=True).start()
+
+    def _ask_import_mode(self):
+        """返回 True=覆盖, False=追加, None=取消"""
+        box = QMessageBox(self.parent_widget)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(_("読み込み方法の選択"))
+        box.setText(_("既存の素材庫に上書きしますか？\n"
+                      "「追加」を選ぶと、既存のファイルはそのまま残ります。"))
+        btn_overwrite = box.addButton(_("上書き"), QMessageBox.ButtonRole.DestructiveRole)
+        btn_append = box.addButton(_("追加"), QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(_("キャンセル"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(btn_append)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked is btn_overwrite:
+            return True
+        if clicked is btn_append:
+            return False
+        return None
+
+    def _import_archive(self, path_in, overwrite):
+        import archive
+        start_time = time.perf_counter()
+
+        try:
+            archive.import_archive(path_in, overwrite=overwrite)
+        except archive.ArchiveError as e:
+            qtlib.post_end_progress(self.parent_widget,
+                                    _(e.message_key).format(**e.kwargs),
+                                    _("素材庫の読み込み失敗"),
+                                    QMessageBox.Icon.Critical)
+            return
+        except Exception as e:
+            qtlib.post_end_progress(self.parent_widget,
+                                    _("素材庫の読み込みに失敗しました…") + f"\n{e}",
+                                    _("素材庫の読み込み失敗"),
+                                    QMessageBox.Icon.Critical)
+            return
+
+        elapsed = time.perf_counter() - start_time
+        mode = _("上書き") if overwrite else _("追加")
+
+        message = _("素材庫の読み込みが完了しました！（{mode}）\n"
+                    "処理時間: {time:.2f} 秒\n\n"
+                    "変更を反映するため、アプリケーションを再起動します。").format(mode=mode, time=elapsed)
+
+        def _finish_and_quit():
+            qtlib.post_end_progress(self.parent_widget, message,
+                                    _("素材庫の読み込み完了"),
+                                    QMessageBox.Icon.Information)
+            QTimer.singleShot(0, self._quit_after_archive)
+
+        QTimer.singleShot(0, _finish_and_quit)
+
+    def _quit_after_archive(self):
+        window = self.parent_widget.window()
+        if hasattr(window, "request_force_quit"):
+            window.request_force_quit()
+        else:
+            from PySide6.QtWidgets import QApplication
+            QApplication.instance().quit()
+
 
 class AppendMenu(QMenu):
     """右键菜单 - 添加图像"""
@@ -103,7 +257,6 @@ class AppendMenu(QMenu):
         self.id_replace = id_replace
         self.target_post = parent
 
-        # 透明图像添加
         menu_transparent = QAction(_("透過画像の追加"), self)
         menu_transparent.setToolTip(_("選択した色を透過して一覧に追加します。"))
         menu_transparent.triggered.connect(self.on_transparent)
@@ -123,7 +276,6 @@ class AppendMenu(QMenu):
             self.addAction(menu_costume)
 
     def on_separate(self):
-        """分割帧"""
         im = editor.open_image(self.path)
         if not im:
             message = _("{name}が開けません！").format(name=self.path.name)
@@ -138,7 +290,6 @@ class AppendMenu(QMenu):
         qtlib.post_select(self.target_post, self.path)
 
     def on_transparent(self):
-        """打开透明色选择对话框"""
         dialog = dialogs.SelectColorDialog(self.parent_widget, self.path, self.frames)
         result = dialog.exec()
         if result != QDialog.DialogCode.Accepted:
@@ -154,7 +305,6 @@ class AppendMenu(QMenu):
         thread.start()
 
     def create_transparent(self, path_image, frames, colors_target, is_face, id_replace):
-        """创建透明图像（线程）"""
         with qtlib.progress_context(self.target_post, _("透過画像の作成に失敗しました…"), _("透過画像作成失敗")):
             frames = frames if frames else editor.get_frames(path_image)
             if not frames:
@@ -175,14 +325,12 @@ class AppendMenu(QMenu):
             qtlib.post_end_progress(self.target_post, message=message, caption=caption, style=style)
 
     def on_costume(self):
-        """开始服装裁剪"""
         qtlib.post_start_progress(self.target_post, _("しばらくお待ちください…"), _("きぐるみ顔切り抜き"))
         thread = threading.Thread(target=self.clip_for_costume,
                                   args=(self.path, self.frames, self.id_replace))
         thread.start()
 
     def clip_for_costume(self, path_image, frames, id_replace):
-        """服装裁剪（线程）"""
         with qtlib.progress_context(self.target_post, _("切り抜きに失敗しました…"), _("切り抜き失敗")):
             frames = frames if frames else editor.get_frames(path_image)
             if not frames:
@@ -228,7 +376,6 @@ class ComponentMenu(QMenu):
             self.addAction(menu_remove)
 
     def on_replace(self):
-        """替换图像"""
         dialog = dialogs.ImageSelectDialog(self.parent_widget, _("画像交換ダイアログ"), self.id_image)
         result = dialog.exec()
         if result != QDialog.DialogCode.Accepted:
@@ -238,11 +385,9 @@ class ComponentMenu(QMenu):
         qtlib.post_append(self.parent_widget, path_image, frames, id_replace)
 
     def on_clipper(self):
-        """打开裁剪器设置"""
         dialog = dialogs.ClipperSelectDialog(self.parent_widget, self.id_image)
         dialog.exec()
 
     def on_remove(self):
-        """删除图像"""
         CONFIG.manager.remove(self.id_image)
         qtlib.post_update(self.parent_widget, True, True, True)
