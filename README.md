@@ -39,7 +39,7 @@ pip install -r requirements.txt
 
 ### License
 
-本项目采用 GPL v3 许可，详见 [LICENSE](./LICENSE)。
+本项目采用 GPL v3 许可，详见 [LICENSE_zh](./LICENSE_zh)。
 
 ---
 
