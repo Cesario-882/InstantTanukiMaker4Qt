@@ -73,7 +73,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name='InstantTanukiMaker',
-    debug=False,
+    debug=True,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
@@ -84,7 +84,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     contents_directory='ELF_requirements',
-    icon='InstantTanuki.ico' if sys.platform == 'win32' else None,
+    icon='Tanukora.ico' if sys.platform == 'win32' else None,
 )
 
 coll = COLLECT(

@@ -262,7 +262,7 @@ class MainWindow(QMainWindow):
             data.get('message', ''),
             self
         )
-        self.dial_progress.Pulse()
+        self.dial_progress.pulse()
         if not self.is_progress:
             self.finish_progress()
 
