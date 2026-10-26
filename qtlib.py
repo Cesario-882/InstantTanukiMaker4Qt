@@ -13,16 +13,19 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import os
+import sys
 import pathlib
+import subprocess
 from contextlib import contextmanager
-from PySide6.QtWidgets import (
-    QMessageBox, QFileDialog, QProgressDialog, QWidget
-)
-from PySide6.QtCore import Qt, QTimer
+
+from PySide6.QtWidgets import QMessageBox, QFileDialog, QProgressDialog
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
 
 import const
-from signals import signals  # 假设你创建了 signals.py
+from i18n import _
+from signals import signals
 
 
 # ===== 对话框函数 =====
@@ -37,149 +40,125 @@ def show_message(parent, message, caption, style=QMessageBox.Icon.Information):
     return msg_box.exec()
 
 
-def show_question(parent, message, caption):
-    """显示问答对话框（Yes/No）"""
+def show_question(parent, message, caption) -> bool:
+    """显示问答对话框，明确返回 True/False"""
     reply = QMessageBox.question(
         parent, caption, message,
         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
     )
-    return reply
+    return reply == QMessageBox.StandardButton.Yes
 
 
-def select_file(parent, caption, wildcard, multiple=False):
-    """选择文件"""
-    # 转换通配符格式：*.json -> JSON files (*.json)
-    if wildcard and not wildcard.startswith("*"):
-        # 如果通配符是 "*.json"，转换为 "JSON files (*.json)"
-        ext = wildcard.replace("*", "")
-        filter_str = f"{ext.upper().replace('.', '')} files ({wildcard})"
-    else:
-        filter_str = wildcard or "All files (*.*)"
+def _to_filter(wildcard) -> str:
+    """将各种格式的通配符转为 Qt 标准 filter 字符串"""
+    if not wildcard:
+        return "All files (*.*)"
+    if isinstance(wildcard, (list, tuple)):
+        # 列表格式：[".jpg", ".png"]
+        patterns = [w if w.startswith("*") else f"*{w}" for w in wildcard]
+        return f"Files ({' '.join(patterns)});;All files (*.*)"
+    if isinstance(wildcard, str):
+        if "(" in wildcard:
+            # 已经是合法的 Qt filter 格式
+            return wildcard
+        # 字符串格式："*.json;*.txt" 或 "*.json"
+        exts = [w.strip() for w in wildcard.split(";") if w.strip()]
+        labels = ";".join(e.upper().replace("*", "").replace(".", "") for e in exts)
+        return f"{labels} files ({wildcard});;All files (*.*)"
+    return "All files (*.*)"
+
+
+def select_file(parent, caption, wildcard, multiple=False) -> pathlib.Path | list | None:
+    """选择文件，统一返回 Path、Path 列表 或 None"""
+    filter_str = _to_filter(wildcard)
+    default_dir = str(const.FOLDER_MATERIAL) if const.FOLDER_MATERIAL.exists() else ""
 
     if multiple:
-        files, _ = QFileDialog.getOpenFileNames(
-            parent, caption, "", filter_str
-        )
+        files, _ = QFileDialog.getOpenFileNames(parent, caption, default_dir, filter_str)
         if files:
             return [pathlib.Path(f) for f in files]
     else:
-        file, _ = QFileDialog.getOpenFileName(
-            parent, caption, "", filter_str
-        )
+        file, _ = QFileDialog.getOpenFileName(parent, caption, default_dir, filter_str)
         if file:
             return pathlib.Path(file)
-    return False
+    return None
 
 
-def select_folder(parent, message):
+def select_folder(parent, message) -> pathlib.Path | None:
     """选择文件夹"""
     folder = QFileDialog.getExistingDirectory(parent, message)
     if folder:
         return pathlib.Path(folder)
-    return False
+    return None
 
 
-def save_file(parent, caption, wildcard, name_save):
+def save_file(parent, caption, wildcard, name_save) -> pathlib.Path | None:
     """保存文件对话框"""
-    # 转换通配符格式
-    if wildcard and not wildcard.startswith("*"):
-        ext = wildcard.replace("*", "")
-        filter_str = f"{ext.upper().replace('.', '')} files ({wildcard})"
-    else:
-        filter_str = wildcard or "All files (*.*)"
-
-    file, _ = QFileDialog.getSaveFileName(
-        parent, caption, name_save, filter_str
-    )
+    filter_str = _to_filter(wildcard)
+    file, _ = QFileDialog.getSaveFileName(parent, caption, name_save, filter_str)
     if file:
         return pathlib.Path(file)
-    return False
+    return None
 
 
-# ===== 事件发送函数（使用信号系统） =====
+# ===== 事件发送函数 =====
 
 def post_update(target_post, preview=False, prop=False, component=False, reset=False):
-    """发送更新信号"""
     signals.update.emit({
-        'preview': preview,
-        'property': prop,
-        'component': component,
-        'reset': reset
+        'preview': preview, 'property': prop, 'component': component, 'reset': reset
     })
 
 
 def post_append(target_post, path_image, frames=None, id_replace=None):
-    """发送添加图像信号"""
-    signals.append.emit({
-        'path_image': path_image,
-        'frames': frames,
-        'id_replace': id_replace
-    })
+    signals.append.emit({'path_image': path_image, 'frames': frames, 'id_replace': id_replace})
 
 
 def post_info(target_post, message, caption, style=QMessageBox.Icon.Information):
-    """发送信息信号"""
-    signals.info.emit({
-        'message': message,
-        'caption': caption,
-        'style': style
-    })
+    signals.info.emit({'message': message, 'caption': caption, 'style': style})
 
 
 def post_start_progress(target_post, message, caption):
-    """发送开始进度信号"""
-    signals.start_progress.emit({
-        'message': message,
-        'caption': caption
-    })
+    signals.start_progress.emit({'message': message, 'caption': caption})
 
 
 def post_end_progress(target_post, message="", caption="",
                       style=QMessageBox.Icon.Information,
                       path_open=None, need_play=False):
-    """发送结束进度信号"""
     signals.end_progress.emit({
-        'message': message,
-        'caption': caption,
-        'style': style,
-        'path_open': path_open,
-        'need_play': need_play
+        'message': message, 'caption': caption, 'style': style,
+        'path_open': path_open, 'need_play': need_play
     })
 
 
 def post_play(target_post):
-    """发送播放信号"""
     signals.play.emit()
 
 
 def post_layout(target_post):
-    """发送布局更新信号"""
     signals.layout.emit()
 
 
 def post_select(target_post, path):
-    """发送选择信号"""
-    signals.select.emit({
-        'path': path
-    })
+    signals.select.emit({'path': path})
 
 
-# ===== 进度对话框上下文管理器 =====
+# ===== 进度对话框生命周期 =====
 
 @contextmanager
 def progress_context(target_post, message, caption):
-    """进度对话框上下文管理器"""
+    """进度对话框生命周期管理器：自动处理开始、异常、结束"""
+    post_start_progress(target_post, message, caption)
     try:
         yield
     except Exception as e:
-        message = message + f"\n{e}"
-        post_end_progress(target_post, message, caption, QMessageBox.Icon.Critical)
+        post_end_progress(target_post, f"{message}\n{e}", caption, QMessageBox.Icon.Critical)
         raise
+    else:
+        post_end_progress(target_post, message, caption)
 
 
-# ===== 进度对话框类 =====
 class ProgressDialog:
-    """进度对话框"""
+    """进度对话框封装"""
     def __init__(self, title, message, parent=None):
         self.dialog = QProgressDialog(message, None, 0, 0, parent)
         self.dialog.setWindowTitle(title)
@@ -189,14 +168,48 @@ class ProgressDialog:
         self.dialog.setAutoReset(True)
         self.dialog.setCancelButton(None)
 
-    def Pulse(self):
-        self.dialog.setValue(1)
+    def pulse(self):
+        """无实际作用（0,0 本身就是忙状态），留作语义兼容"""
+        pass
 
-    def Destroy(self):
-        self.dialog.close()
-        self.dialog.deleteLater()
+    def destroy(self):
+        """彻底销毁对话框，防止悬空指针"""
+        if self.dialog is not None:
+            self.dialog.close()
+            self.dialog.deleteLater()
+            self.dialog = None
 
-    def Show(self):
-        self.dialog.show()
-        self.dialog.raise_()
-        self.dialog.activateWindow()
+    def show(self):
+        if self.dialog is not None:
+            self.dialog.show()
+            self.dialog.raise_()
+            self.dialog.activateWindow()
+
+
+# ===== 系统文件管理器调用 =====
+
+def open_folder(path):
+    """调用系统默认文件管理器打开指定路径，净化环境变量"""
+    path = pathlib.Path(path)
+    if not path.exists():
+        return
+
+    try:
+        if sys.platform == "win32":
+            os.startfile(path)
+        else:
+            # 复制环境变量，剥离 Python 注入的 Qt 路径，防止子进程加载错误库
+            clean_env = os.environ.copy()
+            for var in ["LD_LIBRARY_PATH", "QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH"]:
+                clean_env.pop(var, None)
+
+            subprocess.Popen(
+                ["xdg-open", str(path)],
+                env=clean_env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+    except Exception as e:
+        error_msg = _("ファイルマネージャを開けませんでした。\n{err}").format(err=str(e))
+        show_message(None, error_msg, _("エラー"), QMessageBox.Icon.Warning)

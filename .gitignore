@@ -26,4 +26,10 @@ ENV/
 Thumbs.db
 
 # 素材/Assets
-Material/
+Material/**/*
+!Material/**/
+!Material/**/.gitkeep
+
+添加/**/*
+!添加/**/
+!添加/**/.gitkeep

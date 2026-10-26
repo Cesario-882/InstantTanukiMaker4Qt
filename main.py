@@ -322,8 +322,8 @@ class MainWindow(QMainWindow):
             return
         message = _("終了してよろしいですか？")
         caption = _("終了確認")
-        reply = qtlib.show_question(self, message, caption)
-        if reply == QMessageBox.StandardButton.Yes:
+        # 现在 show_question 直接返回布尔值
+        if qtlib.show_question(self, message, caption):
             event.accept()
         else:
             event.ignore()
