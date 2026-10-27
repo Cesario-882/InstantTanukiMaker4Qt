@@ -56,8 +56,7 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 echo "正在执行 PyInstaller..."
 "$PYTHON" -m PyInstaller --noconfirm \
   --distpath "$WORK_DIR/dist" \
-  --workpath "$WORK_DIR/build" \
-  InstantTanukiMaker.spec > /dev/null 2>&1
+  --workpath "$WORK_DIR/build"
 
 echo "正在组装外置资源..."
 out="$WORK_DIR/dist/InstantTanukiMaker"

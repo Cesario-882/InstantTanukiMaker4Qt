@@ -1,9 +1,9 @@
-name: Build and Append Release
+name: Build Release
 
 on:
   push:
     tags:
-      - '*' # 匹配所有 Tag，不限制前缀
+      - '*'
 
 permissions:
   contents: write
@@ -14,74 +14,37 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: '3.14'
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pyinstaller PySide6 pillow numpy opencv-python natsort zstandard
-
-    - name: Get OS Info
-      id: os_info
+    - name: Run build.ps1
       shell: pwsh
       run: |
-        $os = (Get-CimInstance Win32_OperatingSystem).Caption -replace 'Microsoft ', '' -replace ' ', '_'
-        echo "OS_NAME=$os" >> $env:GITHUB_OUTPUT
+        $env:CI = "true"
+        ./build.ps1
 
-    - name: Build with PyInstaller
-      run: pyinstaller --clean InstantTanukiMaker.spec
-
-    - name: Zip Windows build
-      run: Compress-Archive -Path dist/InstantTanukiMaker/* -DestinationPath InstantTanukiMaker-${{ steps.os_info.outputs.OS_NAME }}.zip
-
-    - name: Upload Windows artifact
+    - name: Upload Windows Artifact
       uses: actions/upload-artifact@v4
       with:
         name: windows-build
-        path: InstantTanukiMaker-*.zip
+        path: ${{ env.USERPROFILE }}\Downloads\InstantTanukiMaker-win-x64.zip
 
   build-linux:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: '3.14'
+    - name: Install zstd
+      run: sudo apt-get update && sudo apt-get install -y zstd
 
-    - name: Install System Dependencies
+    - name: Run build.sh
       run: |
-        sudo apt-get update
-        sudo apt-get install -y zstd libgl1 libegl1 libxkbcommon-x11-0 libxcb-cursor0
+        chmod +x ./build.sh
+        ./build.sh
 
-    - name: Install Python dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pyinstaller PySide6 pillow numpy opencv-python natsort zstandard
-
-    - name: Get OS Info
-      id: os_info
-      run: |
-        . /etc/os-release
-        echo "OS_NAME=${VERSION_CODENAME^}" >> $GITHUB_OUTPUT
-
-    - name: Build with PyInstaller
-      run: pyinstaller --clean InstantTanukiMaker.spec
-
-    - name: Tar and Zstd Linux build
-      run: |
-        cd dist
-        tar -cf - InstantTanukiMaker/ | zstd -19 -o ../InstantTanukiMaker-Linux-${{ steps.os_info.outputs.OS_NAME }}.tar.zst
-
-    - name: Upload Linux artifact
+    - name: Upload Linux Artifact
       uses: actions/upload-artifact@v4
       with:
         name: linux-build
-        path: InstantTanukiMaker-Linux-*.tar.zst
+        # 直接用绝对路径，防止变量解析抽风
+        path: /home/runner/Downloads/InstantTanukiMaker-linux-x64.tar.zst
 
   release:
     needs: [build-windows, build-linux]
@@ -93,18 +56,12 @@ jobs:
         path: artifacts
         merge-multiple: true
 
-    # 关键：使用 softprops/action-gh-release 的 append_body 特性，
-    # 并且 files 只包含我们要上传的压缩包
-    - name: Append Files to Release
-      uses: softprops/action-gh-release@v2
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
       with:
-        # 这里直接使用触发 tag 的名字作为 Release 的 Tag
-        tag_name: ${{ github.ref_name }}
         files: |
-          artifacts/InstantTanukiMaker-*.zip
-          artifacts/InstantTanukiMaker-*.tar.zst
-        # 如果 Release 已经存在，则追加；如果不存在，则按当前 Tag 新建
-        generate_release_notes: true
+          artifacts/*.zip
+          artifacts/*.tar.zst
         draft: false
         prerelease: false
       env:

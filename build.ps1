@@ -2,6 +2,9 @@ $ErrorActionPreference = 'Stop'
 $ProjectDir = $PSScriptRoot
 Set-Location $ProjectDir
 
+# 判断是否在 CI 环境中 (GitHub Actions 会自动注入 CI=true)
+$IsCI = $env:CI -eq "true"
+
 Write-Host "=== [1/5] 正在检查构建环境 ===" -ForegroundColor Cyan
 
 # 1. 找 Python (优先 py 启动器)
@@ -58,10 +61,12 @@ $WorkDir = Join-Path $env:TEMP ("instant-tanuki-build-" + [System.IO.Path]::GetR
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 
 try {
+    # 提示：如果你的打包产物需要终端看日志，请在 spec 里设置 console=True
+    # 在 CI 里把输出重定向到 null 会吞掉错误信息，所以本地和 CI 我们都不屏蔽它（去掉 *> $null）
     & $PythonExe -m PyInstaller --noconfirm `
         --distpath "$WorkDir\dist" `
         --workpath "$WorkDir\build" `
-        InstantTanukiMaker.spec *> $null
+        InstantTanukiMaker.spec
 
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller 构建失败，请检查 spec 文件或源码。"
@@ -84,8 +89,10 @@ try {
     Write-Host "=== [5/5] 正在高速压缩产物 ===" -ForegroundColor Cyan
     $DownloadDir = Join-Path $env:USERPROFILE "Downloads"
     if (-not (Test-Path $DownloadDir)) { New-Item -ItemType Directory -Force -Path $DownloadDir | Out-Null }
+
     $OutFile = Join-Path $DownloadDir "InstantTanukiMaker-win-x64.zip"
 
+    # ======== 关键修复 1：防止在同一个环境下重复打包报错 ========
     if (Test-Path $OutFile) { Remove-Item $OutFile -Force }
 
     # 调用 .NET 原生 ZipFile 方法，比 Compress-Archive 快十倍且不吞文件
@@ -98,9 +105,14 @@ try {
 
 } catch {
     Write-Host "【构建失败】$_" -ForegroundColor Red
+    exit 1 # ======== 关键修复 2：失败时必须 exit 1，让 CI 亮红灯 ========
 } finally {
     # 清理临时工作目录
     Remove-Item -Recurse -Force $WorkDir -ErrorAction SilentlyContinue
 }
-Write-Host "按任意键退出..."
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+
+# ======== 关键修复 3：只在本地双击时暂停，在 CI 直接跳过 ========
+if (-not $IsCI) {
+    Write-Host "按任意键退出..."
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+}
