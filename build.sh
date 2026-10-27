@@ -4,7 +4,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
 
-echo "正在检查构建环境..."
+echo "=== [1/5] 正在检查构建环境 ==="
 
 # 1. 找 Python
 SYS_PYTHON=""
@@ -29,48 +29,51 @@ if [ ! -x "$PYTHON" ]; then
 fi
 
 # 3. 处理依赖
-echo "正在读取 requirements-freeze.txt..."
+echo "=== [2/5] 正在校验依赖 ==="
 if [ ! -f "$PROJECT_DIR/requirements-freeze.txt" ]; then
     echo "【错误】找不到 requirements-freeze.txt" >&2
     exit 1
 fi
 
-echo "正在检查已安装的依赖..."
-if ! "$PYTHON" -m pip check >/dev/null 2>&1; then
-    echo "正在解析依赖关系..."
-    "$PYTHON" -m pip install --upgrade pip --quiet
-    "$PYTHON" -m pip install -r "$PROJECT_DIR/requirements-freeze.txt"
-else
-    # 如果依赖完整，但缺 pyinstaller，单独装
-    if ! "$PYTHON" -c "import PyInstaller" >/dev/null 2>&1; then
-        echo "正在安装 PyInstaller..."
-        "$PYTHON" -m pip install pyinstaller
-    fi
-fi
+"$PYTHON" -m pip install --upgrade pip --quiet
+"$PYTHON" -m pip install -r "$PROJECT_DIR/requirements-freeze.txt" --quiet
+"$PYTHON" -m pip install pyinstaller --quiet
 
-# 4. 打包 (完全 APT 风格)
-echo "正在准备打包..."
+# 4. 打包
+echo "=== [3/5] 正在执行 PyInstaller 打包 ==="
 WORK_DIR="$(mktemp -d -t instant-tanuki-build.XXXXXX)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-echo "正在执行 PyInstaller..."
+# 把输出重定向去掉了，让 CI 能看到红字
 "$PYTHON" -m PyInstaller --noconfirm \
   --distpath "$WORK_DIR/dist" \
-  --workpath "$WORK_DIR/build"
+  --workpath "$WORK_DIR/build" \
+  InstantTanukiMaker.spec
 
-echo "正在组装外置资源..."
+echo "=== [4/5] 正在组装外置资源 ==="
 out="$WORK_DIR/dist/InstantTanukiMaker"
-cp -r Material "$out/Material"
-cp -r 添加     "$out/添加"
-cp -r locale   "$out/locale"
+for res in "Material" "添加" "locale"; do
+    if [ -d "$PROJECT_DIR/$res" ]; then
+        cp -r "$PROJECT_DIR/$res" "$out/$res"
+    else
+        echo "【警告】未找到资源目录: $res"
+    fi
+done
 
-echo "正在压缩产物..."
+echo "=== [5/5] 正在压缩产物 ==="
 DOWNLOAD_DIR="${XDG_DOWNLOAD_DIR:-$HOME/Downloads}"
 if [ ! -d "$DOWNLOAD_DIR" ]; then
     if [ -d "$HOME/下载" ]; then DOWNLOAD_DIR="$HOME/下载"; else mkdir -p "$DOWNLOAD_DIR"; fi
 fi
 OUT_FILE="$DOWNLOAD_DIR/InstantTanukiMaker-linux-x64.tar.zst"
-tar -C "$out" -cf - . | zstd -19 -T0 -o "$OUT_FILE"
+
+# 确认有 zstd 才压缩
+if command -v zstd >/dev/null 2>&1; then
+    tar -C "$out" -cf - . | zstd -19 -T0 -o "$OUT_FILE"
+else
+    echo "【错误】未找到 zstd 命令！" >&2
+    exit 1
+fi
 
 echo "已成功构建：$OUT_FILE"
 ls -lh "$OUT_FILE"
