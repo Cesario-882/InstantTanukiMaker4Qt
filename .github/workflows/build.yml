@@ -24,7 +24,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: windows-build
-        path: ${{ env.USERPROFILE }}\Downloads\InstantTanukiMaker-win-x64.zip
+        path: C:\Users\runneradmin\Downloads\InstantTanukiMaker-win-x64.zip
 
   build-linux:
     runs-on: ubuntu-latest
