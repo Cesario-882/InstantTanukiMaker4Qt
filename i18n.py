@@ -16,11 +16,11 @@
 import json
 import os
 import sys
-import locale
 import pathlib
 import logging
 from typing import Optional, Dict
 from functools import lru_cache
+from PySide6.QtCore import QLocale
 
 
 _current: Dict[str, str] = {}
@@ -63,25 +63,32 @@ LOCALE_DIR = _find_locale_dir()
 
 # ===== 系统语言 =====
 def get_system_language() -> str:
+    """使用 Qt 底层获取系统语言，彻底解决 Windows 下 Python locale 识别抽风的问题"""
     try:
-        lang_env = (os.environ.get('LANG', '')
-                    or os.environ.get('LC_ALL', '')
-                    or os.environ.get('LC_MESSAGES', ''))
-        if lang_env:
-            lang_code = lang_env.split('.')[0]
-        else:
-            lang_code = locale.getlocale()[0] or 'en'
-    except Exception:
-        lang_code = 'en'
+        # 只要 import 了 QtCore，即使没创建 QApplication，QLocale.system() 也会去读系统底层 API
+        sys_locale = QLocale.system()
+        lang_name = sys_locale.name()  # 返回格式如 "zh_CN", "en_US", "ja_JP"
 
-    if not lang_code:
-        return 'en'
-    if lang_code.startswith('zh'):
-        if any(p in lang_code for p in ('TW', 'HK', 'MO', 'Hant')):
-            return 'zh_TW'
-        return 'zh_CN'
-    if lang_code.startswith('ja'):
-        return 'ja'
+        if lang_name.startswith('zh'):
+            if any(p in lang_name for p in ('TW', 'HK', 'MO')):
+                return 'zh_TW'
+            return 'zh_CN'
+        if lang_name.startswith('ja'):
+            return 'ja'
+    except Exception:
+        pass
+
+    # 只有在 Qt 拿不到的时候，才用原生的兜底
+    try:
+        import locale
+        lang_code = locale.getlocale()[0] or 'en'
+        if lang_code.startswith('zh'):
+            return 'zh_CN'
+        if lang_code.startswith('ja'):
+            return 'ja'
+    except Exception:
+        pass
+
     return 'en'
 
 
@@ -242,5 +249,3 @@ def has_key(key: str) -> bool:
 
 def add_translation(key: str, value: str) -> None:
     _current[key] = value
-
-load_language()

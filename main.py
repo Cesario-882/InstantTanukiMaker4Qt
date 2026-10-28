@@ -281,7 +281,7 @@ class MainWindow(QMainWindow):
         if not self.dial_progress:
             return
 
-        self.dial_progress.Destroy()
+        self.dial_progress.destroy()
         self.dial_progress = None
 
         self.raise_()
@@ -333,8 +333,18 @@ def main():
     """主函数"""
     import signal
 
+    # ====== 强制开启高 DPI 缩放 ======
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
+
     app = QApplication(sys.argv)
     app.setApplicationName(_("たぬこら"))
+
+    # 在这里重新加载语言，确保 QApplication 已经初始化，QLocale 绝对准确
+    import i18n
+    i18n.load_language()
 
     const.FONT_FAMILY = const.register_fonts()
 

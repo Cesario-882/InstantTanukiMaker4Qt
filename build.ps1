@@ -61,8 +61,6 @@ $WorkDir = Join-Path $env:TEMP ("instant-tanuki-build-" + [System.IO.Path]::GetR
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 
 try {
-    # 提示：如果你的打包产物需要终端看日志，请在 spec 里设置 console=True
-    # 在 CI 里把输出重定向到 null 会吞掉错误信息，所以本地和 CI 我们都不屏蔽它（去掉 *> $null）
     & $PythonExe -m PyInstaller --noconfirm `
         --distpath "$WorkDir\dist" `
         --workpath "$WorkDir\build" `
@@ -75,14 +73,14 @@ try {
     Write-Host "=== [4/5] 正在组装外置资源 ===" -ForegroundColor Cyan
     $out = "$WorkDir\dist\InstantTanukiMaker"
 
-    # 检查外置资源目录是否存在再复制
-    $resources = @("Material", "添加", "locale")
+    # 检查外置资源目录是否存在再复制 (加入 LICENSE)
+    $resources = @("Material", "添加", "locale", "LICENSE", "LICENSE_zh")
     foreach ($res in $resources) {
         $srcPath = Join-Path $ProjectDir $res
         if (Test-Path $srcPath) {
             Copy-Item -Recurse -Force $srcPath "$out\$res"
         } else {
-            Write-Host "【警告】未找到资源目录: $res" -ForegroundColor Yellow
+            Write-Host "【警告】未找到资源: $res" -ForegroundColor Yellow
         }
     }
 
@@ -92,10 +90,8 @@ try {
 
     $OutFile = Join-Path $DownloadDir "InstantTanukiMaker-win-x64.zip"
 
-    # ======== 关键修复 1：防止在同一个环境下重复打包报错 ========
     if (Test-Path $OutFile) { Remove-Item $OutFile -Force }
 
-    # 调用 .NET 原生 ZipFile 方法，比 Compress-Archive 快十倍且不吞文件
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.ZipFile]::CreateFromDirectory($out, $OutFile, [System.IO.Compression.CompressionLevel]::Optimal, $false)
 
@@ -105,13 +101,11 @@ try {
 
 } catch {
     Write-Host "【构建失败】$_" -ForegroundColor Red
-    exit 1 # ======== 关键修复 2：失败时必须 exit 1，让 CI 亮红灯 ========
+    exit 1
 } finally {
-    # 清理临时工作目录
     Remove-Item -Recurse -Force $WorkDir -ErrorAction SilentlyContinue
 }
 
-# ======== 关键修复 3：只在本地双击时暂停，在 CI 直接跳过 ========
 if (-not $IsCI) {
     Write-Host "按任意键退出..."
     $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
