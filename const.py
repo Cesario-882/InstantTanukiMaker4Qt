@@ -193,12 +193,13 @@ ARCHIVE_ZSTD_LEVEL = 19
 ARCHIVE_MEMBER_LIMIT = 256 * 1024 * 1024   # 单文件 256 MiB
 ARCHIVE_TOTAL_LIMIT = 20 * 1024 * 1024 * 1024   # 总量 20 GiB
 
-# 打包对象：Material 与 添加，以及 locale 下的 uma 文件夹
-ARCHIVE_ROOTS = ["Material", "添加", "locale/uma"]
+# 打包对象：Material 与 添加，以及 locale 下的 uma 和 tag 文件夹
+ARCHIVE_ROOTS = ["Material", "添加", "locale/uma", "locale/tag"]
 ARCHIVE_FOLDERS = [
     FOLDER_MATERIAL,
     FOLDER_APPEND,
-    FOLDER_LOCALE / "uma"
+    FOLDER_LOCALE / "uma",
+    FOLDER_LOCALE / "tag"
 ]
 # 运行时产物，不打包/不覆盖
 ARCHIVE_EXCLUDE = {"Material/preview.gif"}

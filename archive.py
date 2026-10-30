@@ -161,9 +161,9 @@ def _check_member(member: tarfile.TarInfo) -> None:
 
     parts = pathlib.PurePosixPath(member.name).parts
     if not parts or not _is_valid_root(parts):
-        raise ArchiveError("アーカイブ内のパスが不正です: {name}", name=member.name)
+        raise ArchiveError("アーカイブ内のパスが不正です（または新しいバージョンが必要です）: {name}", name=member.name)
     if any(p in ("..", "") for p in parts):
-        raise ArchiveError("アーカイブ内のパスが不正です: {name}", name=member.name)
+        raise ArchiveError("アーカイブ内のパスが不正です（または新しいバージョンが必要です）: {name}", name=member.name)
     if member.size > const.ARCHIVE_MEMBER_LIMIT:
         raise ArchiveError("ファイルサイズが上限を超えています: {name}", name=member.name)
 
@@ -204,12 +204,15 @@ def import_archive(path_in: pathlib.Path,
 
                         target = base / pathlib.PurePosixPath(member.name)
 
-                        is_uma_json = (
-                            member.name.startswith("locale/uma/") and
+                        # ===== 同时拦截 uma 和 tag 的 JSON =====
+                        is_locale_json = (
+                            (member.name.startswith("locale/uma/") or
+                             member.name.startswith("locale/tag/")) and
                             member.name.endswith(".json")
                         )
 
-                        if is_uma_json and target.exists():
+                        # 如果是本地化 JSON，执行智能合并
+                        if is_locale_json and target.exists():
                             if progress:
                                 progress(member.name)
                             src = tar.extractfile(member)
@@ -222,6 +225,7 @@ def import_archive(path_in: pathlib.Path,
                                 pass
                             continue
 
+                        # 其他文件照旧
                         if overwrite and target.exists():
                             try:
                                 target.unlink()
@@ -236,7 +240,6 @@ def import_archive(path_in: pathlib.Path,
                         if progress:
                             progress(member.name)
 
-                        # ===== 优化：减少 I/O 查询 =====
                         if not target.parent.exists():
                             target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -246,7 +249,7 @@ def import_archive(path_in: pathlib.Path,
 
                         with open(target, "wb") as out:
                             while True:
-                                chunk = src.read(1 << 20) # 每次读 1MB
+                                chunk = src.read(1 << 20)
                                 if not chunk:
                                     break
                                 out.write(chunk)
