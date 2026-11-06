@@ -846,6 +846,7 @@ class PropertyPanel(QWidget):
 class ThumbnailPanel(QWidget):
     MARGIN = 5
     ICON_SIZE = (100, 100)
+    THUMB_SIZE = (90, 90)
 
     def __init__(self, parent, path, on_dialog):
         super().__init__(parent)
