@@ -56,12 +56,20 @@ class PartsImage:
                                            top + (bottom - top) // 2 - height // 2))
             self.image = self.image.crop(self.image.getbbox())
 
-        if not self.icon:
-            self.icon = editor.create_icon(self.image, const.ICON_SIZE, const.THUMB_SIZE,
-                                           const.BG_PARTS)
+        self._icon_cache = None
+        self._is_edited = False
 
-        if not self.image_edit:
+    def get_qpixmap_icon(self):
+        if self._icon_cache is None:
+            pil_icon = editor.create_icon(self.image, const.ICON_SIZE, const.THUMB_SIZE, const.BG_PARTS)
+            self._icon_cache = const.pil_to_qpixmap(pil_icon)
+        return self._icon_cache
+
+    def get_edited_image(self):
+        if not self._is_edited:
             self.edit_image()
+            self._is_edited = True
+        return self.image_edit
 
     def edit_image(self):
         image_edit = self.image.convert("RGBA")
@@ -82,13 +90,13 @@ class PartsImage:
         self.image_edit = image_edit
 
     def create_layer(self, size_layer, offset_base):
+        img = self.get_edited_image()
         campus_layer = Image.new("RGBA", size_layer, (255, 255, 255, 0))
-        offset = np.array(size_layer) // 2 - np.array(
-            self.image_edit.size) // 2 + self.offset + self.offset_center
+        offset = np.array(size_layer) // 2 - np.array(img.size) // 2 + self.offset + self.offset_center
         if self.type_image not in const.TYPES_BASE:
             offset = offset + offset_base
 
-        campus_layer.paste(self.image_edit, tuple(offset))
+        campus_layer.paste(img, tuple(offset))
         return campus_layer
 
     def edit_layer(self, layer, clippers, color_selection):
@@ -111,7 +119,7 @@ class PartsImage:
         self.color_blend = parts_replace.color_blend
         self.alpha_blend = parts_replace.alpha_blend
         self.clippers_id = parts_replace.clippers_id if clippers_id is None else clippers_id
-        self.edit_image()
+        self._is_edited = False
 
     def set_offset(self, offset):
         self.offset = offset
@@ -125,33 +133,33 @@ class PartsImage:
 
     def set_angle(self, angle):
         self.angle = angle
-        self.edit_image()
+        self._is_edited = False
 
     def add_angle(self, angle_delta):
         self.angle = np.clip(self.angle + angle_delta, -360, 360)
-        self.edit_image()
+        self._is_edited = False
 
     def set_zoom(self, zoom_x, zoom_y):
         self.zoom_x = zoom_x
         self.zoom_y = zoom_y
-        self.edit_image()
+        self._is_edited = False
 
     def set_transparency(self, transparency):
         self.transparency = transparency
-        self.edit_image()
+        self._is_edited = False
 
     def set_alias(self, anti_alias):
         self.anti_alias = anti_alias
 
     def set_flip(self, is_flip):
         self.is_flip = is_flip
-        self.edit_image()
+        self._is_edited = False
 
     def set_blend_color(self, mode_blend, color_blend, alpha_blend):
         self.mode_blend = mode_blend
         self.color_blend = color_blend
         self.alpha_blend = alpha_blend
-        self.edit_image()
+        self._is_edited = False
 
     def add_clipper(self, id_parts):
         if id_parts not in self.clippers_id:
@@ -168,17 +176,14 @@ class PartsImage:
 
     def collide(self, pos):
         x, y = pos
-        width, height = self.image_edit.size
+        width, height = self.get_edited_image().size
         if not (0 <= x < width and 0 <= y < height):
             return False
 
-        alpha = self.image_edit.split()[-1]
+        alpha = self.get_edited_image().split()[-1]
         alpha_pixel = alpha.getpixel((x, y))
 
         return bool(alpha_pixel)
-
-    def get_bmp_icon(self):
-        return self.icon  # 直接返回 PIL Image
 
 
 @dataclass
@@ -213,10 +218,7 @@ class FileImage:
             im = Image.open(self.path_image)
             self.frames = [frame.convert("RGBA") for frame in ImageSequence.Iterator(im)]
 
-        if not self.icon:
-            self.icon = editor.create_icon(self.frames[0], const.ICON_SIZE, const.THUMB_MINI_SIZE,
-                                           const.BG_FILE,
-                                           alignment="topleft")
+        self._icon_cache = None
 
         if self.label is None:
             self.label = self.path_image.stem
@@ -229,6 +231,14 @@ class FileImage:
 
         if self.number_frames is None:
             self.number_frames = len(self.frames)
+
+    def get_qpixmap_icon(self):
+        if self._icon_cache is None:
+            pil_icon = editor.create_icon(self.frames[0], const.ICON_SIZE, const.THUMB_MINI_SIZE,
+                                          const.BG_FILE, alignment="topleft")
+            self._icon_cache = const.pil_to_qpixmap(pil_icon)
+        return self._icon_cache
+
     def get_type(self, path_image, frames):
         in_material = const.FOLDER_MATERIAL in path_image.parents
         in_append = const.FOLDER_APPEND in path_image.parents
@@ -238,7 +248,6 @@ class FileImage:
         path_root = const.FOLDER_MATERIAL if in_material else const.FOLDER_APPEND
 
         for type_image in const.TYPES_IMAGE:
-            # 该类型可能对应的目录名：Material 侧日文原名 + 添加侧中文别名
             names = [type_image]
             alias = const.DIC_ALIAS.get(type_image)
             if alias:
@@ -320,10 +329,6 @@ class FileImage:
         self.alpha_blend = file_replace.alpha_blend
         self.clippers_id = file_replace.clippers_id.copy()
 
-    # self.iconに直接bmpを与えたかったけどbmpはpickle化出来なかったので都度変換する。
-    def get_bmp_icon(self):
-        return self.icon  # 直接返回 PIL Image
-
     def __iter__(self):
         self.cycle_image = cycle(self.frames)
         return self
@@ -342,7 +347,6 @@ class FrameImage:
             self.order_parts.append(parts_append)
             return
 
-        # 既に削除してしまって同じID_FILEがない場合スキップ
         lst_id_file = [parts.id_file for parts in self.order_parts]
         if id_file_replace not in lst_id_file:
             return
@@ -392,7 +396,6 @@ class FrameImage:
             image_empty = Image.new("RGBA", size, (255, 255, 255, 0))
             return image_empty
 
-        # レイヤーの作成
         dic_layer = {parts.id_parts: parts.create_layer(size, offset_base)
                      for parts in order_parts}
         for parts in order_parts:
@@ -401,15 +404,12 @@ class FrameImage:
             parts.edit_layer(dic_layer.get(parts.id_parts), clippers, color_selection)
             dic_layer[parts.id_parts] = parts.layer
 
-        # 合成
         campus_frame = Image.new("RGBA", size, (255, 255, 255, 0))
         for parts in order_parts:
             if not parts.visible:
                 continue
-
             campus_frame = Image.alpha_composite(campus_frame, parts.layer)
 
-        # アンチエイリアス
         alpha_campus = campus_frame.split()[-1]
         campus_smooth = campus_frame.filter(ImageFilter.GaussianBlur(0.75))
         for parts in order_parts:
@@ -420,7 +420,7 @@ class FrameImage:
                 campus_frame = editor.apply_anti_alias(campus_frame, campus_smooth, parts.layer)
 
             campus_frame = Image.alpha_composite(campus_frame, parts.layer)
-            # クリッパーで切り取った部分にもアンチエイリアスを掛ける
+
             clippers = [parts_clipper for parts_clipper in order_parts if
                         parts_clipper.id_parts in parts.clippers_id]
             for parts_clipper in clippers:
@@ -470,13 +470,11 @@ class ImageManager:
     order_frame: list = field(default_factory=lambda: [FrameImage()])
     order_file: dict = field(default_factory=dict)
     dic_file_children: dict = field(default_factory=dict)
-    # selection
     ix_frame: int = 0
     selections: list = field(default_factory=list)
     id_selection_file: str = None
     selected_file: bool = True
     marked_selection: bool = False
-    # property
     number_frames: int = 1
     size: tuple[int, int] = const.DEFAULT_SIZE
     duration_single: int = 100
@@ -485,32 +483,10 @@ class ImageManager:
     filter_image: const.ImageFilter = const.ImageFilter.NONE
     fixed_size: bool = False
     fixed_number_frames: bool = False
-    # system
     offset_base: np.ndarray = field(default_factory=lambda: const.OFFSET_FLAT.copy())
     id_file: int = 0
     id_parts: int = 0
 
-    # デバッグ用
-    def show_data(self):
-        print("order_file", len(self.order_file))
-        for file in self.order_file.values():
-            print("  ", file.label)
-
-        print("order_frame", len(self.order_frame))
-        for frame in self.order_frame:
-            print("  ", len(frame.order_parts), frame.order_parts)
-
-        print("lst_parts")
-        for lst_parts in self.dic_file_children.values():
-            print("  ", len(lst_parts), lst_parts)
-
-        print("dic_image", len(self.dic_image))
-        for image in self.dic_image.values():
-            print(image.label)
-
-        print("selections", self.ix_frame, self.selections, self.is_selected())
-
-    # 画像の追加
     def append(self, path_image, frames=None):
         file = self.create_file_image(path_image, frames)
         if not file:
@@ -539,7 +515,6 @@ class ImageManager:
 
         self.adjust_system()
 
-    # 画像の置換
     def replace(self, path_image, id_replace, frames=None):
         replaced_file = self.is_file(id_replace)
         file_new = self.create_file_image(path_image, frames, replaced_file)
@@ -558,21 +533,17 @@ class ImageManager:
         lst_id_old = self.get_lst_clippers_id(id_replace)
         file_new.overwrite_property(file_old)
 
-        # order_file
         files = list(self.order_file.values())
         ix_replace = [file.id_file for file in files].index(id_replace)
         files[ix_replace] = file_new
         self.order_file = {file.id_file: file for file in files}
 
-        # dic_image
         del self.dic_image[id_replace]
         for parts in self.dic_file_children.get(id_replace):
             if parts:
                 del self.dic_image[parts.id_parts]
 
-        # dic_lst_parts
         del self.dic_file_children[id_replace]
-        # selections
         if id_replace in self.selections:
             ix = self.selections.index(id_replace)
             self.selections[ix] = file_new.id_file
@@ -602,13 +573,11 @@ class ImageManager:
         self.update_clipper(None, dic_update_parts)
         self.select(ix_replace, parts_new.id_parts, False)
 
-    # 画像の削除
     def remove(self, id_image):
         if self.is_file(id_image):
             self.remove_by_id_file(id_image)
         else:
             self.remove_by_id_parts(id_image)
-
         self.set_offset_base()
 
     def remove_by_id_file(self, id_file):
@@ -628,7 +597,6 @@ class ImageManager:
         dic_update_file = {id_file: None}
         dic_update_parts = {id_parts: None for id_parts in lst_id_parts}
         self.update_clipper(dic_update_file, dic_update_parts)
-
         self.adjust_system()
 
     def remove_by_id_parts(self, id_parts):
@@ -646,7 +614,6 @@ class ImageManager:
         dic_update_parts = {id_parts: None}
         self.update_clipper(None, dic_update_parts)
 
-    # クリッパー
     def add_clipper(self, id_target, id_clipper):
         image = self.dic_image.get(id_target)
         image.add_clipper(id_clipper)
@@ -671,7 +638,6 @@ class ImageManager:
             if parts_target and parts_clipper:
                 parts_target.remove_clipper(parts_clipper.id_parts)
 
-    # 画像の交換・削除に伴うクリッパーのid更新
     def update_clipper(self, dic_update_file, dic_update_parts):
         for file in list(self.order_file.values()):
             if dic_update_file:
@@ -681,21 +647,15 @@ class ImageManager:
                 if parts:
                     parts.update_clipper(dic_update_parts)
 
-    # オールクリア　初期化
     def clear(self):
-        # data
         self.order_file = {}
         self.order_frame = [FrameImage()]
         self.dic_file_children = {}
         self.dic_image = {}
-
-        # selection
         self.ix_frame = 0
         self.selections = []
         self.selected_file = True
         self.marked_selection = False
-
-        # property
         self.number_frames = 1
         self.size = const.DEFAULT_SIZE
         self.duration_single = 100
@@ -704,13 +664,10 @@ class ImageManager:
         self.filter_image = const.ImageFilter.NONE
         self.fixed_size = False
         self.fixed_number_frames = False
-
-        # system
         self.offset_base = np.array([0, 0])
         self.id_file = 0
         self.id_parts = 0
 
-    # フレーム・画像選択
     def shift_ix_frame(self, ix_delta):
         self.ix_frame = (self.ix_frame + ix_delta) % self.number_frames
         if self.ix_frame < 0:
@@ -757,10 +714,8 @@ class ImageManager:
     def get_image_by_pos(self, pos):
         frame = self.order_frame[self.ix_frame]
         parts = frame.get_collide_image(pos)
-
         if not parts:
             return None
-
         id_image = parts.id_file if self.selected_file else parts.id_parts
         return id_image
 
@@ -770,13 +725,11 @@ class ImageManager:
     def is_selected(self):
         return any(self.selections)
 
-    # データ取得
     def get_images_selection(self):
         return self.get_selection_file() if self.selected_file else self.get_selection_parts()
 
     def get_preview(self):
         frame = self.order_frame[self.ix_frame]
-        # frame = self.order_frame[self.ix_frame]
         if self.marked_selection:
             im_preview = frame.composite_image(self.size, self.offset_base,
                                                self.selections, self.selected_file)
@@ -806,7 +759,6 @@ class ImageManager:
                 children = self.dic_file_children.get(id_file)
                 children = [parts for parts in children if parts]
                 parts_selection.extend(children)
-
             return parts_selection
 
         order_parts = self.order_frame[self.ix_frame].order_parts
@@ -814,7 +766,6 @@ class ImageManager:
         for parts in order_parts:
             if parts.id_file in self.selections:
                 parts_selection.append(parts)
-
         return parts_selection
 
     def get_selections_id(self):
@@ -822,7 +773,6 @@ class ImageManager:
         for selection in self.get_images_selection():
             id_image = selection.id_file if self.selected_file else selection.id_parts
             lst_id.append(id_image)
-
         return lst_id
 
     def get_ix_frame_by_id_parts(self, id_parts):
@@ -836,7 +786,6 @@ class ImageManager:
                                for parts_new in self.dic_file_children.get(id_clipper)]
         else:
             lst_clippers_id = [id_clipper]
-
         return lst_clippers_id
 
     def get_order_file_display(self):
@@ -867,7 +816,6 @@ class ImageManager:
         if self.can_marking():
             self.marked_selection = not self.marked_selection
 
-    # 画像プロパティ設定
     def set_offset(self, offset):
         if self.selected_file:
             for file in self.get_selection_file():
@@ -960,7 +908,6 @@ class ImageManager:
             if parts:
                 parts.label = f"【F{ix + 1}】{label}"
 
-    # 合成プロパティ設定
     def fix_num_frames(self, fixed):
         self.fixed_number_frames = fixed
         if not fixed:
@@ -978,7 +925,6 @@ class ImageManager:
             if self.number_frames > ix:
                 continue
 
-            # frame = self.order_frame.get(ix, FrameImage())
             frame = FrameImage()
             for im_parts, file in zip(lst_parts, self.order_file.values()):
                 label = f"【F{ix + 1}】{file.label}"
@@ -1031,7 +977,6 @@ class ImageManager:
         if not self.can_marking():
             self.marked_selection = False
 
-    # ソート
     def sort_file(self, id_from, id_to):
         files = list(self.order_file.values())
         lst_id = [file.id_file for file in files]
@@ -1039,18 +984,15 @@ class ImageManager:
         file_insert = files.pop(ix_from)
         files.insert(ix_to, file_insert)
         self.order_file = {file.id_file: file for file in files}
-        # フレームもファイル順通りにソート
         order_id_file = list(self.order_file.keys())
         for frame in self.order_frame:
             frame.sort_file(order_id_file)
-
         self.set_offset_base()
 
     def sort_parts(self, num_frame, id_from, id_to):
         frame = self.order_frame[num_frame]
         frame.sort_parts(id_from, id_to)
 
-    # 合成、保存
     def get_frames_composite(self):
         frames_composite = [frame.composite_image(self.size, self.offset_base) for frame in
                             self.order_frame]
@@ -1089,7 +1031,6 @@ class ImageManager:
             [parts.visible for frame in self.order_frame for parts in
              frame.order_parts])
 
-    # システム用
     def set_offset_base(self):
         for file in list(self.order_file.values()):
             if file.type_image in const.TYPES_BASE:
@@ -1101,11 +1042,8 @@ class ImageManager:
                     self.offset_base = const.OFFSET_FLAT
 
     def adjust_system(self):
-        # サイズ調整
         if not self.fixed_size:
             self.size = self.get_size_adjust()
-
-        # フレーム拡張
 
         if not self.fixed_number_frames:
             number_lcm = self.get_number_lcm()
@@ -1142,7 +1080,6 @@ class ImageManager:
         id_file = self.issue_id_file()
         try:
             file = FileImage(id_file, path_image, frames)
-
         except (UnidentifiedImageError, FileNotFoundError, PermissionError):
             return False
 

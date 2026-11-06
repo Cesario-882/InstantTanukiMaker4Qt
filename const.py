@@ -19,7 +19,7 @@ from dataclasses import dataclass, fields
 from PIL import Image
 import numpy as np
 
-from PySide6.QtGui import QImage, QFontDatabase
+from PySide6.QtGui import QImage, QFontDatabase, QPixmap
 
 
 VERSION = "3.0.1" # 随便填的，删掉之前记得调查引用
@@ -282,6 +282,14 @@ def pil_to_qimage(pil_image):
                     QImage.Format.Format_RGBA8888).copy()
     return qimage
 
+def pil_to_qpixmap(pil_image):
+    if pil_image is None:
+        return QPixmap()
+    if isinstance(pil_image, QPixmap):
+        return pil_image
+    if isinstance(pil_image, QImage):
+        return QPixmap.fromImage(pil_image)
+    return QPixmap.fromImage(pil_to_qimage(pil_image))
 
 # 预生成的 QImage（可在 QApplication 创建前使用）
 UNSELECTED_QIMAGE = pil_to_qimage(BG_UNSELECTED)

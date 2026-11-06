@@ -20,13 +20,12 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton,
     QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QRadioButton,
-    QTabWidget, QListWidget, QListWidgetItem, QTreeWidget,
-    QTreeWidgetItem, QScrollArea, QFrame, QSizePolicy,
-    QGridLayout, QTableWidget, QTableWidgetItem, QHeaderView,
-    QGroupBox, QButtonGroup, QMessageBox
+    QTabWidget, QScrollArea, QSizePolicy, QGridLayout, 
+    QTableWidget, QTableWidgetItem, QGroupBox, QMessageBox,
+    QListView, QTreeView, QStyledItemDelegate, QStyle, QListWidget, QListWidgetItem
 )
-from PySide6.QtCore import Qt, QTimer, QPoint, QSize, Signal, Slot
-from PySide6.QtGui import QPixmap, QImage, QFont, QColor, QKeyEvent, QMouseEvent, QWheelEvent, QIcon, QMovie
+from PySide6.QtCore import Qt, QTimer, QPoint, QSize, Signal, QAbstractListModel, QModelIndex
+from PySide6.QtGui import QPixmap, QImage, QIcon, QMovie, QFont, QColor, QStandardItemModel, QStandardItem
 
 import const
 from config import CONFIG
@@ -41,11 +40,10 @@ from i18n import _, display
 class BitmapPanel(QWidget):
     def __init__(self, parent=None, pil_image=None, path_file=None, qimage=None):
         super().__init__(parent)
-
         self.label = QLabel()
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label.setStyleSheet("border: none;")
-
+        
         layout = QVBoxLayout(self)
         layout.addWidget(self.label)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -66,79 +64,52 @@ class BitmapPanel(QWidget):
             self.set_pixmap(empty)
 
     def set_pixmap(self, pixmap: QPixmap):
-        """设置 QPixmap"""
         if pixmap is None or pixmap.isNull():
             empty = QPixmap(1, 1)
             empty.fill(Qt.GlobalColor.transparent)
             self.current_pixmap = empty
         else:
             self.current_pixmap = pixmap
-
         self.label.setPixmap(self.current_pixmap)
         self.label.setFixedSize(self.current_pixmap.size())
         self.setMinimumSize(self.current_pixmap.size())
 
     def set_pil_image(self, pil_image):
-        """从 PIL Image 设置图像"""
         self.pil_image = pil_image
         if pil_image is None:
             return
-        pixmap = self.pil_to_qpixmap(pil_image)
-        self.set_pixmap(pixmap)
+        # 兼容传入 QImage 或 QPixmap 的情况
+        if isinstance(pil_image, QPixmap):
+            self.set_pixmap(pil_image)
+        elif isinstance(pil_image, QImage):
+            self.set_pixmap(QPixmap.fromImage(pil_image))
+        else:
+            self.set_pixmap(const.pil_to_qpixmap(pil_image))
 
     def set_qimage(self, qimage):
-        """从 QImage 设置图像"""
         if qimage is None or qimage.isNull():
-            empty = QPixmap(1, 1)
-            empty.fill(Qt.GlobalColor.transparent)
-            self.set_pixmap(empty)
-            return
-        pixmap = QPixmap.fromImage(qimage)
-        self.set_pixmap(pixmap)
+            self.set_pixmap(QPixmap())
+        else:
+            self.set_pixmap(QPixmap.fromImage(qimage))
 
     def load_file(self, path_file: Path):
-        """从文件加载图像"""
         try:
             from PIL import Image
             pil_image = Image.open(path_file).convert("RGBA")
             self.set_pil_image(pil_image)
-        except Exception as e:
-            print(f"Failed to load image: {e}")
-            empty = QPixmap(1, 1)
-            empty.fill(Qt.GlobalColor.transparent)
-            self.set_pixmap(empty)
-
-    def pil_to_qpixmap(self, pil_image):
-        """将 PIL Image 转换为 QPixmap"""
-        if pil_image is None:
-            return QPixmap()
-        # 检查是否是 PIL Image
-        if hasattr(pil_image, 'mode'):
-            if pil_image.mode != 'RGBA':
-                pil_image = pil_image.convert('RGBA')
-            data = pil_image.tobytes("raw", "RGBA")
-            qimage = QImage(data, pil_image.width, pil_image.height,
-                            QImage.Format.Format_RGBA8888).copy()
-            return QPixmap.fromImage(qimage)
-        # 如果已经是 QImage，直接转换
-        elif isinstance(pil_image, QImage):
-            return QPixmap.fromImage(pil_image)
-        return QPixmap()
+        except Exception:
+            self.set_pixmap(QPixmap())
 
     def get_pixmap(self) -> QPixmap:
         return self.current_pixmap
 
     def mousePressEvent(self, event):
-        """鼠标点击事件 - 用于子类重写"""
         pass
 
 
-# ===== 焦点显示面板 =====
 class FocusDisplayPanel(BitmapPanel):
-    """焦点状态显示"""
     def __init__(self, parent):
         super().__init__(parent)
-
         im_focus_on = editor.open_image(const.PATH_FOCUS_ON).convert("RGBA")
         im_focus_off = editor.open_image(const.PATH_FOCUS_OFF).convert("RGBA")
         self.pil_focus_on = im_focus_on
@@ -149,8 +120,6 @@ class FocusDisplayPanel(BitmapPanel):
         self.label.mousePressEvent = self.on_click
 
     def on_click(self, event):
-        """点击切换焦点"""
-        # 找到预览面板并设置焦点
         parent = self.parent()
         while parent:
             if hasattr(parent, 'sbmp_preview') and parent.sbmp_preview:
@@ -159,14 +128,11 @@ class FocusDisplayPanel(BitmapPanel):
             parent = parent.parent()
 
     def set_focus(self, is_focused):
-        """设置焦点状态"""
         pil_img = self.pil_focus_on if is_focused else self.pil_focus_off
         self.set_pil_image(pil_img)
 
 
-# ===== 帧号显示面板 =====
 class FrameNumberDisplayPanel(BitmapPanel):
-    """帧号显示"""
     def __init__(self, parent):
         super().__init__(parent)
         self.im_display = editor.open_image(const.PATH_DISPLAY_NUM).convert("RGBA")
@@ -188,24 +154,19 @@ class FrameNumberDisplayPanel(BitmapPanel):
         self.set_pil_image(im_draw)
 
     def on_click(self, event):
-        """点击切换帧"""
         if event.button() == Qt.MouseButton.LeftButton:
             ix_delta = -1
         elif event.button() == Qt.MouseButton.RightButton:
             ix_delta = 1
         else:
             return
-
         CONFIG.manager.shift_ix_frame(ix_delta)
         qtlib.post_update(self.window(), True, True, True)
 
 
-# ===== 选择标记状态面板 =====
 class SelectionMarkerStatusPanel(BitmapPanel):
-    """选择标记状态"""
     def __init__(self, parent):
         super().__init__(parent)
-
         im_mark_on = editor.open_image(const.PATH_MARK_ON).convert("RGBA")
         im_mark_off = editor.open_image(const.PATH_MARK_OFF).convert("RGBA")
         self.pil_mark_on = im_mark_on
@@ -229,17 +190,13 @@ class SelectionMarkerStatusPanel(BitmapPanel):
                 qtlib.post_update(self.window(), preview=True)
 
 
-# ===== 播放状态面板 =====
 class PlayingStatusPanel(QWidget):
-    """播放/暂停控制"""
     def __init__(self, parent):
         super().__init__(parent)
         self.is_playing = False
-
         self.panel_pause = BitmapPanel(self, path_file=const.PATH_PAUSE)
         self.panel_pause.label.setToolTip(_("再生"))
         self.panel_pause.label.mousePressEvent = self.on_play
-
         self.anim_label = QLabel()
         self.anim_label.setToolTip(_("停止"))
         self.anim_label.hide()
@@ -253,10 +210,7 @@ class PlayingStatusPanel(QWidget):
 
     def on_play(self, event):
         if not CONFIG.manager.can_save():
-            message = _("画像が表示されていません！")
-            caption = _("画像未表示")
-            style = QMessageBox.Icon.Warning
-            qtlib.post_info(self.window(), message, caption, style)
+            qtlib.post_info(self.window(), _("画像が表示されていません！"), _("画像未表示"), QMessageBox.Icon.Warning)
             return
         qtlib.post_play(self.window())
 
@@ -272,12 +226,9 @@ class PlayingStatusPanel(QWidget):
         self.panel_pause.show()
 
 
-# ===== 头部面板 =====
 class HeaderPanel(QWidget):
-    """头部控制面板"""
     def __init__(self, parent):
         super().__init__(parent)
-
         self.panel_focus = FocusDisplayPanel(self)
         self.panel_display_num = FrameNumberDisplayPanel(self)
         self.panel_marker = SelectionMarkerStatusPanel(self)
@@ -302,24 +253,19 @@ class HeaderPanel(QWidget):
     def set_focus(self, is_focused):
         self.panel_focus.set_focus(is_focused)
 
-# ===== 预览面板 =====
+
 class PreviewPanel(QWidget):
-    """预览显示面板"""
     DELAY_UPDATE = 10
     frame_loaded = Signal(object)
 
     def __init__(self, parent):
         super().__init__(parent)
-
         self.panel_header = HeaderPanel(self)
-
-        # 预览标签
         self.sbmp_preview = QLabel()
         self.sbmp_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.sbmp_preview.setStyleSheet("border: 1px solid gray;")
         self.sbmp_preview.setMinimumSize(*const.DEFAULT_SIZE)
 
-        # 动画标签
         self.anime_preview = QLabel()
         self.anime_preview.hide()
 
@@ -335,70 +281,51 @@ class PreviewPanel(QWidget):
         self.delay_update = QTimer()
         self.delay_update.setSingleShot(True)
         self.delay_update.timeout.connect(self.start_loading)
-        self.is_loading = False
+        
         self.movie = None
+        self.current_task_id = 0
 
-        # 信号连接
         self.frame_loaded.connect(self.show_frame)
-
-        # 鼠标事件
+        
         self.sbmp_preview.mousePressEvent = self.on_left
         self.sbmp_preview.mouseDoubleClickEvent = self.on_left
         self.sbmp_preview.mouseReleaseEvent = self.on_up
         self.sbmp_preview.mouseMoveEvent = self.on_motion
         self.sbmp_preview.setMouseTracking(True)
         self.sbmp_preview.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-
-        # 键盘事件
         self.sbmp_preview.keyPressEvent = self.on_press
-
-        # 滚轮事件
         self.sbmp_preview.wheelEvent = self.on_wheel
 
     def update_display(self):
-        """更新显示"""
         self.delay_update.start(self.DELAY_UPDATE)
         self.panel_header.update_display()
 
     def start_loading(self):
-        """开始加载"""
-        self.thread_loading = threading.Thread(target=self.load_frame, daemon=True)
-        self.thread_loading.start()
+        self.current_task_id += 1
+        task_id = self.current_task_id
+        threading.Thread(target=self.load_frame, args=(task_id,), daemon=True).start()
 
-    def load_frame(self):
-        """加载帧（线程）"""
+    def load_frame(self, task_id):
+        if task_id != self.current_task_id: return
         image_preview = CONFIG.manager.get_preview()
-        self.frame_loaded.emit(image_preview)
+        if task_id == self.current_task_id:
+            self.frame_loaded.emit(image_preview)
 
     def show_frame(self, image_preview):
-        """显示帧（主线程）"""
         if image_preview is None:
             return
-
-        # 停掉播放中的动画
         if self.movie:
             self.movie.stop()
             self.movie = None
 
-        pixmap = self.pil_to_qpixmap(image_preview)
+        pixmap = const.pil_to_qpixmap(image_preview)
         self.sbmp_preview.setPixmap(pixmap)
         self.sbmp_preview.setFixedSize(pixmap.size())
         self.sbmp_preview.show()
         self.anime_preview.hide()
         qtlib.post_layout(self.window())
 
-    def pil_to_qpixmap(self, pil_image):
-        """PIL 转 QPixmap"""
-        if pil_image is None:
-            return QPixmap()
-        if pil_image.mode != 'RGBA':
-            pil_image = pil_image.convert('RGBA')
-        data = pil_image.tobytes("raw", "RGBA")
-        qimage = QImage(data, pil_image.width, pil_image.height, QImage.Format.Format_RGBA8888).copy()
-        return QPixmap.fromImage(qimage)
-
     def on_left(self, event):
-        """鼠标左键点击"""
         pos = event.position().toPoint()
         pos_np = np.array([pos.x(), pos.y()])
         is_collide = CONFIG.manager.select_by_pos(pos_np, event.modifiers() & Qt.KeyboardModifier.ControlModifier)
@@ -408,11 +335,9 @@ class PreviewPanel(QWidget):
         qtlib.post_update(self.window(), preview=True, prop=True)
 
     def on_motion(self, event):
-        """鼠标移动"""
         self.sbmp_preview.setFocus()
         if not self.is_dragging:
             return
-
         pos_cur = event.position().toPoint()
         offset = pos_cur - self.pos_start
         self.pos_start = pos_cur
@@ -420,19 +345,15 @@ class PreviewPanel(QWidget):
         qtlib.post_update(self.window(), preview=True, prop=True)
 
     def on_up(self, event):
-        """鼠标释放"""
         self.is_dragging = False
 
     def on_press(self, event):
-        """键盘按键"""
         key = event.key()
-
         if key == Qt.Key.Key_Tab:
             ix_delta = -1 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1
             CONFIG.manager.shift_ix_frame(ix_delta)
             qtlib.post_update(self.window(), True, True, True)
             return
-
         elif key == Qt.Key.Key_Escape:
             CONFIG.manager.switch_marking()
             qtlib.post_update(self.window(), True, True, True)
@@ -441,16 +362,11 @@ class PreviewPanel(QWidget):
         if not CONFIG.manager.is_selected():
             return
 
-        # 方向键移动
         direction = {
-            Qt.Key.Key_Up: np.array((0, -1)),
-            Qt.Key.Key_W: np.array((0, -1)),
-            Qt.Key.Key_Down: np.array((0, 1)),
-            Qt.Key.Key_S: np.array((0, 1)),
-            Qt.Key.Key_Left: np.array((-1, 0)),
-            Qt.Key.Key_A: np.array((-1, 0)),
-            Qt.Key.Key_Right: np.array((1, 0)),
-            Qt.Key.Key_D: np.array((1, 0)),
+            Qt.Key.Key_Up: np.array((0, -1)), Qt.Key.Key_W: np.array((0, -1)),
+            Qt.Key.Key_Down: np.array((0, 1)), Qt.Key.Key_S: np.array((0, 1)),
+            Qt.Key.Key_Left: np.array((-1, 0)), Qt.Key.Key_A: np.array((-1, 0)),
+            Qt.Key.Key_Right: np.array((1, 0)), Qt.Key.Key_D: np.array((1, 0)),
         }.get(key)
 
         if direction is None:
@@ -462,10 +378,8 @@ class PreviewPanel(QWidget):
         qtlib.post_update(self.window(), preview=True, prop=True)
 
     def on_wheel(self, event):
-        """滚轮事件"""
         if not CONFIG.manager.is_selected():
             return
-
         delta = event.angleDelta().y()
         rate_angle = 10 if event.modifiers() & Qt.KeyboardModifier.ControlModifier else 1
         angle_delta = -1 if delta < 0 else 1
@@ -473,16 +387,12 @@ class PreviewPanel(QWidget):
         qtlib.post_update(self.window(), preview=True, prop=True)
 
     def show_animation(self):
-        """播放预览 GIF"""
-
         if self.movie:
             self.movie.stop()
             self.movie = None
-
         path_gif = const.PATH_GIF_PREVIEW
         if not path_gif.exists():
             return
-
         self.movie = QMovie(str(path_gif))
         self.movie.setCacheMode(QMovie.CacheMode.CacheAll)
         self.anime_preview.setMovie(self.movie)
@@ -491,340 +401,165 @@ class PreviewPanel(QWidget):
         self.movie.start()
 
 
-# ===== 文件列表控件 =====
-class FileListCtrl(QListWidget):
-    """图像文件列表 - 完整 PySide6 版本"""
+class FileListModel(QAbstractListModel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.files = []
+        self.placeholder_icon = QIcon(QPixmap(48, 48))
+
+    def rowCount(self, parent=QModelIndex()):
+        return len(self.files)
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+        file = self.files[index.row()]
+
+        if role == Qt.ItemDataRole.DisplayRole:
+            return file.label
+        elif role == Qt.ItemDataRole.DecorationRole:
+            return QIcon(file.get_qpixmap_icon())
+        elif role == Qt.ItemDataRole.CheckStateRole:
+            return Qt.CheckState.Checked if file.visible else Qt.CheckState.Unchecked
+        elif role == Qt.ItemDataRole.UserRole:
+            return file.id_file
+        return None
+
+    def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
+        if role == Qt.ItemDataRole.CheckStateRole:
+            file = self.files[index.row()]
+            file.visible = (value == Qt.CheckState.Checked.value)
+            self.dataChanged.emit(index, index, [Qt.ItemDataRole.CheckStateRole])
+            return True
+        return False
+
+    def flags(self, index):
+        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsDragEnabled
+
+    def update_files(self, new_files):
+        self.beginResetModel()
+        self.files = new_files
+        self.endResetModel()
+
+
+class FileListCtrl(QListView):
     def __init__(self, parent):
         super().__init__(parent)
         self.setIconSize(QSize(48, 48))
-        self.setViewMode(QListWidget.ViewMode.IconMode)
-        self.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.setViewMode(QListView.ViewMode.IconMode)
+        self.setResizeMode(QListView.ResizeMode.Adjust)
         self.setWordWrap(False)
-        self.setFlow(QListWidget.Flow.LeftToRight)
+        self.setFlow(QListView.Flow.LeftToRight)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
-        self.setDragDropMode(QListWidget.DragDropMode.InternalMove)
-
+        self.setDragDropMode(QListView.DragDropMode.InternalMove)
         self.target_post = parent.window() if hasattr(parent, 'window') else parent
-        self.lst_data = []
-        self.order_il = []
-        self.accept_check = True
-        self.dragging = False
-        self.ix_from = -1
 
-        self.itemClicked.connect(self.on_item_clicked)
-        self.itemDoubleClicked.connect(self.on_item_double_clicked)
-        self.model().rowsMoved.connect(self.on_rows_moved)
-        self.itemChanged.connect(self.on_item_changed)
-
-        self.update_display()
+        self.model = FileListModel(self)
+        self.setModel(self.model)
+        
+        self.clicked.connect(self.on_item_clicked)
+        self.doubleClicked.connect(self.on_item_double_clicked)
+        self.model.dataChanged.connect(self.on_data_changed)
 
     def update_display(self):
-        """更新显示"""
-        self.clear()
-        self.lst_data = []
-        self.order_il = []
+        files = CONFIG.manager.get_order_file_display()
+        self.model.update_files(files)
 
-        order_file = CONFIG.manager.get_order_file_display()
-
-        for file in order_file:
-            self.order_il.append(file.id_file)
-            pixmap = self.pil_to_qpixmap(file.icon)
-            icon = QIcon(pixmap)
-
-            item = QListWidgetItem(icon, file.label)
-            item.setData(Qt.ItemDataRole.UserRole, file.id_file)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked if file.visible else Qt.CheckState.Unchecked)
-
-            self.addItem(item)
-            self.lst_data.append(file.id_file)
-
-    def pil_to_qpixmap(self, pil_image):
-        """PIL 转 QPixmap"""
-        if pil_image is None:
-            return QPixmap()
-        if pil_image.mode != 'RGBA':
-            pil_image = pil_image.convert('RGBA')
-        data = pil_image.tobytes("raw", "RGBA")
-        qimage = QImage(data, pil_image.width, pil_image.height,
-                        QImage.Format.Format_RGBA8888).copy()
-        return QPixmap.fromImage(qimage)
-
-    def on_item_clicked(self, item):
-        """点击列表项"""
-        id_file = item.data(Qt.ItemDataRole.UserRole)
+    def on_item_clicked(self, index):
+        id_file = index.data(Qt.ItemDataRole.UserRole)
         if id_file:
             CONFIG.manager.select(None, id_file, False)
             qtlib.post_update(self.window(), preview=True, prop=True)
 
-    def on_item_double_clicked(self, item):
-        """双击编辑标签"""
-        self.editItem(item)
+    def on_item_double_clicked(self, index):
+        pass
 
-    def on_item_changed(self, item):
-        """复选框状态变化"""
-        if not self.accept_check:
-            return
-
-        id_file = item.data(Qt.ItemDataRole.UserRole)
-        if id_file:
-            visible = item.checkState() == Qt.CheckState.Checked
-            CONFIG.manager.set_file_visible(id_file, visible)
-            qtlib.post_update(self.window(), preview=True, component=True)
-
-    def on_rows_moved(self, parent, start, end, destination, row):
-        """拖放排序"""
-        if start == row:
-            return
-
-        id_from = self.lst_data[start]
-        id_to = self.lst_data[row]
-        CONFIG.manager.sort_file(id_from, id_to)
-        qtlib.post_update(self.window(), True, True, True)
+    def on_data_changed(self, top_left, bottom_right, roles):
+        if Qt.ItemDataRole.CheckStateRole in roles:
+            id_file = top_left.data(Qt.ItemDataRole.UserRole)
+            visible = top_left.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked.value
+            if id_file:
+                CONFIG.manager.set_file_visible(id_file, visible)
+                qtlib.post_update(self.window(), preview=True, component=True)
 
     def reset_icon(self):
-        """重置图标"""
-        self.clear()
-        self.lst_data = []
-        self.order_il = []
+        self.model.update_files([])
 
     def contextMenuEvent(self, event):
-        """右键菜单"""
-        item = self.itemAt(event.pos())
-        if not item:
-            return
-
-        id_file = item.data(Qt.ItemDataRole.UserRole)
+        index = self.indexAt(event.pos())
+        if not index.isValid(): return
+        id_file = index.data(Qt.ItemDataRole.UserRole)
         if id_file:
             menu = menus.ComponentMenu(self.target_post, id_file)
             menu.exec(event.globalPos())
 
     def keyPressEvent(self, event):
-        """键盘事件 - 删除键删除"""
         if event.key() == Qt.Key.Key_Delete:
-            item = self.currentItem()
-            if item:
-                id_file = item.data(Qt.ItemDataRole.UserRole)
+            index = self.currentIndex()
+            if index.isValid():
+                id_file = index.data(Qt.ItemDataRole.UserRole)
                 if id_file:
                     CONFIG.manager.remove(id_file)
                     qtlib.post_update(self.window(), True, True, True)
         super().keyPressEvent(event)
 
 
-# ===== 部件树形控件 =====
-class PartsTreeCtrl(QTreeWidget):
-    """部件树形结构 - 完整 PySide6 版本"""
+class PartsTreeCtrl(QTreeView):
     def __init__(self, parent):
         super().__init__(parent)
-        self.setHeaderLabel(_("詳細構成"))
+        self.setHeaderHidden(False)
         self.setIconSize(QSize(24, 24))
-        self.setStyleSheet("QTreeWidget::item { height: 28px; }")
+        self.setStyleSheet("QTreeView::item { height: 28px; }")
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
-        self.setDragDropMode(QTreeWidget.DragDropMode.InternalMove)
-
+        self.setDragDropMode(QTreeView.DragDropMode.InternalMove)
         self.target_post = parent.window() if hasattr(parent, 'window') else parent
-        self.order_il = []
-        self.item_from = None
-        self.accept_label = False
-        self.label_prev = ""
-        self.accept_check = True      # 程序性更新期间置 False，挡掉 itemChanged
-
-        self.itemClicked.connect(self.on_item_clicked)
-        self.itemDoubleClicked.connect(self.on_item_double_clicked)
-        self.itemChanged.connect(self.on_item_changed)
-
-        self.update_display()
+        
+        self.model = QStandardItemModel()
+        self.model.setHorizontalHeaderLabels([_("詳細構成")])
+        self.setModel(self.model)
 
     def update_display(self):
-        """更新显示"""
-        self.accept_check = False
-        try:
-            self.clear()
-            self.order_il = []
+        self.model.clear()
+        self.model.setHorizontalHeaderLabels([_("詳細構成")])
+        order_frame = CONFIG.manager.get_order_frame()
+        ix_selection = CONFIG.manager.ix_frame
 
-            order_frame = CONFIG.manager.get_order_frame()
-            ix_selection = CONFIG.manager.ix_frame
-            item_selection = None
+        for ix, frame in enumerate(order_frame):
+            frame_item = QStandardItem(_("フレーム【{num}】").format(num=ix + 1))
+            frame_item.setData(ix, Qt.ItemDataRole.UserRole)
+            frame_item.setEditable(False)
+            
+            for parts in frame.get_order_parts_display():
+                parts_item = QStandardItem(parts.label)
+                parts_item.setIcon(QIcon(parts.get_qpixmap_icon()))
+                parts_item.setData(parts.id_parts, Qt.ItemDataRole.UserRole)
+                parts_item.setCheckable(True)
+                parts_item.setCheckState(Qt.CheckState.Checked if parts.visible else Qt.CheckState.Unchecked)
+                
+                frame_item.appendRow(parts_item)
 
-            for ix, frame in enumerate(order_frame):
-                # 创建帧节点
-                frame_item = QTreeWidgetItem(self)
-                frame_item.setText(0, _("フレーム【{num}】").format(num=ix + 1))
-                frame_item.setData(0, Qt.ItemDataRole.UserRole, ix)
-                frame_item.setFlags(frame_item.flags() | Qt.ItemFlag.ItemIsDropEnabled)
+            self.model.appendRow(frame_item)
 
-                # 添加部件节点
-                for parts in frame.get_order_parts_display():
-                    self.order_il.append(parts.id_parts)
-
-                    parts_item = QTreeWidgetItem(frame_item)
-                    label = parts.label + "　" * (15 - len(parts.label))
-                    parts_item.setText(0, label)
-                    parts_item.setData(0, Qt.ItemDataRole.UserRole, parts.id_parts)
-                    parts_item.setFlags(parts_item.flags() |
-                                        Qt.ItemFlag.ItemIsUserCheckable |
-                                        Qt.ItemFlag.ItemIsDragEnabled)
-
-                    # 设置图标
-                    pixmap = self.pil_to_qpixmap(parts.icon)
-                    parts_item.setIcon(0, QIcon(pixmap))
-
-                    # 复选框
-                    parts_item.setCheckState(
-                        0,
-                        Qt.CheckState.Checked if parts.visible else Qt.CheckState.Unchecked
-                    )
-
-                # 展开当前帧
-                if ix_selection == ix:
-                    self.expandItem(frame_item)
-                    item_selection = frame_item
-        finally:
-            self.accept_check = True
-
-        # 展开根节点
-        self.expandToDepth(0)
-
-        # 选择当前项
-        if item_selection:
-            self.setCurrentItem(item_selection)
-
-    def pil_to_qpixmap(self, pil_image):
-        """PIL 转 QPixmap"""
-        if pil_image is None:
-            return QPixmap()
-        if pil_image.mode != 'RGBA':
-            pil_image = pil_image.convert('RGBA')
-        data = pil_image.tobytes("raw", "RGBA")
-        qimage = QImage(
-            data, pil_image.width, pil_image.height, QImage.Format.Format_RGBA8888
-        ).copy()
-        return QPixmap.fromImage(qimage)
-
-    def on_item_clicked(self, item, column):
-        """点击树形项"""
-        data = item.data(0, Qt.ItemDataRole.UserRole)
-        if data is None:
-            return
-
-        # 如果是帧（int类型）
-        if isinstance(data, int):
-            ix_frame = data
-            CONFIG.manager.select(ix_frame, None, False)
-        else:
-            # 如果是部件
-            id_parts = data
-            parent = item.parent()
-            if parent:
-                ix_frame = parent.data(0, Qt.ItemDataRole.UserRole)
-                if ix_frame is not None:
-                    CONFIG.manager.select(ix_frame, id_parts, False)
-
-        qtlib.post_update(self.window(), preview=True, prop=True)
-
-    def on_item_double_clicked(self, item, column):
-        """双击编辑标签"""
-        data = item.data(0, Qt.ItemDataRole.UserRole)
-        if data is None or isinstance(data, int):
-            return
-
-        self.accept_label = True
-        self.label_prev = item.text(0)
-        self.editItem(item, column)
-
-    def on_item_changed(self, item, column):
-        """复选框状态变化 - 只处理用户操作，不改变选中项"""
-        if not self.accept_check:
-            return
-
-        data = item.data(0, Qt.ItemDataRole.UserRole)
-        if data is None or isinstance(data, int):
-            return
-
-        id_parts = data
-        parent = item.parent()
-        if parent:
-            visible = item.checkState(0) == Qt.CheckState.Checked
-            CONFIG.manager.set_parts_visible(id_parts, visible)
-            qtlib.post_update(self.window(), preview=True, prop=True)
-
-    def dropEvent(self, event):
-        """拖放排序"""
-        source_item = self.currentItem()
-        if not source_item:
-            event.ignore()
-            return
-
-        # 获取目标位置
-        target_item = self.itemAt(event.position().toPoint())
-        if not target_item:
-            event.ignore()
-            return
-
-        source_data = source_item.data(0, Qt.ItemDataRole.UserRole)
-        target_data = target_item.data(0, Qt.ItemDataRole.UserRole)
-
-        # 只允许同层级拖放
-        if source_item.parent() != target_item.parent():
-            event.ignore()
-            return
-
-        # 只允许部件拖放（不是帧）
-        if isinstance(source_data, int) and isinstance(target_data, int):
-            # 获取帧索引
-            parent = source_item.parent()
-            if parent:
-                num_frame = parent.data(0, Qt.ItemDataRole.UserRole)
-                if num_frame is not None:
-                    CONFIG.manager.sort_parts(num_frame, source_data, target_data)
-                    qtlib.post_update(self.window(), True, True, True)
-                    event.accept()
-                    return
-
-        event.ignore()
+            if ix_selection == ix:
+                self.expand(frame_item.index())
 
     def contextMenuEvent(self, event):
-        """右键菜单"""
-        item = self.itemAt(event.pos())
-        if not item:
-            return
-
-        data = item.data(0, Qt.ItemDataRole.UserRole)
-        if data is None or isinstance(data, int):
-            return
-
-        id_parts = data
-        menu = menus.ComponentMenu(self.target_post, id_parts)
-        menu.exec(event.globalPos())
-
-    def keyPressEvent(self, event):
-        """键盘事件 - 删除键删除"""
-        if event.key() == Qt.Key.Key_Delete:
-            item = self.currentItem()
-            if item:
-                data = item.data(0, Qt.ItemDataRole.UserRole)
-                if data and not isinstance(data, int):
-                    CONFIG.manager.remove(data)
-                    qtlib.post_update(self.window(), True, True, True)
-        super().keyPressEvent(event)
+        index = self.indexAt(event.pos())
+        if not index.isValid(): return
+        data = index.data(Qt.ItemDataRole.UserRole)
+        if data and not isinstance(data, int):
+            menu = menus.ComponentMenu(self.target_post, data)
+            menu.exec(event.globalPos())
 
     def reset_icon(self):
-        """重置图标"""
-        self.accept_check = False
-        try:
-            self.clear()
-            self.order_il = []
-        finally:
-            self.accept_check = True
+        self.model.clear()
 
 
-# ===== 选择查看器面板 =====
 class SelectionViewerPanel(QScrollArea):
-    """选择图像查看器"""
     def __init__(self, parent):
         super().__init__(parent)
         self.setWidgetResizable(True)
@@ -846,7 +581,6 @@ class SelectionViewerPanel(QScrollArea):
         self.create_icon(const.UNSELECTED_QIMAGE)
 
     def update_display(self):
-        """更新显示"""
         lst_id_selection = CONFIG.manager.get_selections_id()
         count_selection = len(lst_id_selection)
 
@@ -864,26 +598,22 @@ class SelectionViewerPanel(QScrollArea):
         if set(self.lst_id) == set(lst_id_selection):
             return
 
-        # 更新图标
         for icon, id_exist, id_selection in zip(self.lst_icon, self.lst_id, lst_id_selection):
             if id_exist == id_selection:
                 continue
-
             if id_selection is None:
                 icon.set_pil_image(const.BG_UNSELECTED)
                 continue
-
             selection = CONFIG.manager.get_image(id_selection)
-            icon.set_pil_image(selection.icon)
+            icon.set_pixmap(selection.get_qpixmap_icon())
 
-        # 添加或删除图标
         num_selection = len(lst_id_selection)
         num_exists = len(self.lst_id)
 
         if num_selection > num_exists:
             images_selection = CONFIG.manager.get_images_selection()
             for im in images_selection[num_exists:]:
-                self.create_icon(im.icon)
+                self.create_icon(im.get_qpixmap_icon())
         elif num_selection < num_exists:
             for panel in self.lst_icon[num_selection:]:
                 panel.deleteLater()
@@ -891,14 +621,16 @@ class SelectionViewerPanel(QScrollArea):
 
         self.lst_id = lst_id_selection
 
-    def create_icon(self, pil_image):
-        """创建图标"""
-        panel_bmp = BitmapPanel(self, pil_image=pil_image)
+    def create_icon(self, pil_or_qpixmap):
+        panel_bmp = BitmapPanel(self)
+        if isinstance(pil_or_qpixmap, QPixmap):
+            panel_bmp.set_pixmap(pil_or_qpixmap)
+        else:
+            panel_bmp.set_pil_image(pil_or_qpixmap)
         self.lst_icon.append(panel_bmp)
         self.layout.insertWidget(len(self.lst_icon) - 1, panel_bmp)
 
     def reset_icon(self):
-        """重置图标"""
         for icon in self.lst_icon[1:]:
             icon.deleteLater()
         self.lst_icon = self.lst_icon[:1]
@@ -906,37 +638,25 @@ class SelectionViewerPanel(QScrollArea):
         self.lst_id = [None]
 
 
-# ===== 属性面板 =====
 class PropertyPanel(QWidget):
-    """属性面板 - 显示和编辑选中图像的属性"""
     def __init__(self, parent):
         super().__init__(parent)
         self.target_post = parent.window() if hasattr(parent, 'window') else parent
-
-        # 创建控件
         self.panel_selection = SelectionViewerPanel(self)
 
         self.spin_offset_x = QSpinBox()
         self.spin_offset_x.setRange(-250, 250)
-        self.spin_offset_x.setValue(0)
-
         self.spin_offset_y = QSpinBox()
         self.spin_offset_y.setRange(-250, 250)
-        self.spin_offset_y.setValue(0)
-
         self.spin_angle = QSpinBox()
         self.spin_angle.setRange(-360, 360)
-        self.spin_angle.setValue(0)
-
         self.spin_trans = QSpinBox()
         self.spin_trans.setRange(0, 254)
-        self.spin_trans.setValue(0)
 
         self.spin_zoom_x = QDoubleSpinBox()
         self.spin_zoom_x.setRange(0.1, 3.0)
         self.spin_zoom_x.setSingleStep(0.01)
         self.spin_zoom_x.setValue(1.0)
-
         self.spin_zoom_y = QDoubleSpinBox()
         self.spin_zoom_y.setRange(0.1, 3.0)
         self.spin_zoom_y.setSingleStep(0.01)
@@ -946,7 +666,6 @@ class PropertyPanel(QWidget):
         for mode in const.MODES_BLEND:
             self.combo_blend.addItem(_(mode), mode)
         self.combo_blend.setCurrentIndex(self.combo_blend.findData(const.BlendMode.NONE))
-
 
         self.ctrl_color = QPushButton()
         self.ctrl_color.setStyleSheet("background-color: #ff0000;")
@@ -959,14 +678,10 @@ class PropertyPanel(QWidget):
         self.spin_alpha.setValue(0.3)
 
         self.check_alias = QCheckBox(_("アンチエイリアス"))
-        self.check_alias.setTristate(False)
-
         self.check_flip = QCheckBox(_("左右反転"))
-        self.check_flip.setTristate(False)
 
-        # 信号连接
-        self.spin_offset_x.valueChanged.connect(lambda: self.on_offset())
-        self.spin_offset_y.valueChanged.connect(lambda: self.on_offset())
+        self.spin_offset_x.valueChanged.connect(self.on_offset)
+        self.spin_offset_y.valueChanged.connect(self.on_offset)
         self.spin_angle.valueChanged.connect(self.on_angle)
         self.spin_zoom_x.valueChanged.connect(self.on_zoom)
         self.spin_zoom_y.valueChanged.connect(self.on_zoom)
@@ -975,25 +690,19 @@ class PropertyPanel(QWidget):
         self.check_alias.stateChanged.connect(self.on_alias)
         self.check_flip.stateChanged.connect(self.on_flip)
 
-        # 布局
         self.setup_layout()
         self.setEnabled(False)
 
     def setup_layout(self):
-        """设置布局"""
         group = QGroupBox(_("パーツプロパティ"))
         layout = QVBoxLayout(group)
 
-        # 选择图像
         select_layout = QHBoxLayout()
         select_layout.addWidget(QLabel(_("選択中画像:")))
         select_layout.addWidget(self.panel_selection)
         layout.addLayout(select_layout)
 
-        # 属性网格
         grid = QGridLayout()
-
-        # 偏移
         grid.addWidget(QLabel(_("オフセット")), 0, 0)
         offset_x_layout = QHBoxLayout()
         offset_x_layout.addWidget(QLabel("X:"))
@@ -1005,13 +714,11 @@ class PropertyPanel(QWidget):
         grid.addLayout(offset_y_layout, 0, 2)
         grid.addWidget(self.check_alias, 0, 3)
 
-        # 角度
         grid.addWidget(QLabel(_("角度")), 1, 0)
         grid.addWidget(self.spin_angle, 1, 1)
         grid.addWidget(QLabel(""), 1, 2)
         grid.addWidget(self.check_flip, 1, 3)
 
-        # 缩放
         grid.addWidget(QLabel(_("拡大率")), 2, 0)
         zoom_x_layout = QHBoxLayout()
         zoom_x_layout.addWidget(QLabel("X:"))
@@ -1023,31 +730,25 @@ class PropertyPanel(QWidget):
         grid.addLayout(zoom_y_layout, 2, 2)
         grid.addWidget(QLabel(""), 2, 3)
 
-        # 透明度
         grid.addWidget(QLabel(_("透過率")), 3, 0)
         grid.addWidget(self.spin_trans, 3, 1)
         grid.addWidget(QLabel(""), 3, 2)
         grid.addWidget(QLabel(""), 3, 3)
 
-        # 颜色混合
         grid.addWidget(QLabel(_("カラーブレンド")), 4, 0)
         grid.addWidget(self.combo_blend, 4, 1)
         grid.addWidget(self.ctrl_color, 4, 2)
         grid.addWidget(self.spin_alpha, 4, 3)
 
         layout.addLayout(grid)
-
-        # 主布局
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(group)
         self.setLayout(main_layout)
 
-        # 初始状态
         self.spin_alpha.hide()
         self.ctrl_color.setEnabled(False)
 
     def on_color_picker(self):
-        """颜色选择器"""
         from PySide6.QtWidgets import QColorDialog
         color = QColorDialog.getColor()
         if color.isValid():
@@ -1055,50 +756,35 @@ class PropertyPanel(QWidget):
             self.on_blend()
 
     def on_offset(self):
-        """偏移变化"""
         self.panel_selection.setFocus()
-        offset = (self.spin_offset_x.value(), self.spin_offset_y.value())
-        CONFIG.manager.set_offset(offset)
+        CONFIG.manager.set_offset((self.spin_offset_x.value(), self.spin_offset_y.value()))
         qtlib.post_update(self.target_post, preview=True)
 
     def on_angle(self):
-        """角度变化"""
         self.panel_selection.setFocus()
-        angle = self.spin_angle.value()
-        CONFIG.manager.set_angle(angle)
+        CONFIG.manager.set_angle(self.spin_angle.value())
         qtlib.post_update(self.target_post, preview=True)
 
     def on_zoom(self):
-        """缩放变化"""
         self.panel_selection.setFocus()
-        zoom_x = self.spin_zoom_x.value()
-        zoom_y = self.spin_zoom_y.value()
-        CONFIG.manager.set_zoom(zoom_x, zoom_y)
+        CONFIG.manager.set_zoom(self.spin_zoom_x.value(), self.spin_zoom_y.value())
         qtlib.post_update(self.target_post, preview=True)
 
     def on_trans(self):
-        """透明度变化"""
         self.panel_selection.setFocus()
-        transparency = self.spin_trans.value()
-        CONFIG.manager.set_transparency(transparency)
+        CONFIG.manager.set_transparency(self.spin_trans.value())
         qtlib.post_update(self.target_post, preview=True)
 
     def on_alias(self):
-        """抗锯齿变化"""
-        anti_alias = self.check_alias.isChecked()
-        CONFIG.manager.set_alias(anti_alias)
+        CONFIG.manager.set_alias(self.check_alias.isChecked())
         qtlib.post_update(self.target_post, preview=True)
 
     def on_flip(self):
-        """翻转变化"""
-        is_flip = self.check_flip.isChecked()
-        CONFIG.manager.set_flip(is_flip)
+        CONFIG.manager.set_flip(self.check_flip.isChecked())
         qtlib.post_update(self.target_post, preview=True)
 
     def on_blend(self):
-        """混合模式变化"""
         self.panel_selection.setFocus()
-
         mode_blend = self.combo_blend.currentData()
         color_blend = self.ctrl_color.palette().button().color().getRgb()[:3]
         alpha_blend = self.spin_alpha.value()
@@ -1106,19 +792,14 @@ class PropertyPanel(QWidget):
         CONFIG.manager.set_blend_color(mode_blend, color_blend, alpha_blend)
         qtlib.post_update(self.target_post, preview=True)
 
-        # 更新可见性
         enable = mode_blend != const.BlendMode.NONE
         self.ctrl_color.setEnabled(enable)
-
         enable_alpha = mode_blend == const.BlendMode.ALPHA
         self.spin_alpha.setVisible(enable_alpha)
         self.spin_alpha.setEnabled(enable_alpha)
 
     def update_display(self):
-        """更新显示"""
         self.panel_selection.update_display()
-
-        # 设置背景颜色
         color_bg = const.COLOR_FILE if CONFIG.manager.selected_file else const.COLOR_PARTS
         self.setStyleSheet(f"background-color: rgb({color_bg[0]}, {color_bg[1]}, {color_bg[2]});")
 
@@ -1132,7 +813,6 @@ class PropertyPanel(QWidget):
             self.setEnabled(True)
 
     def set_properties_single(self, selection):
-        """设置单个属性"""
         offset_x, offset_y = selection.offset
         width, height = CONFIG.manager.size
 
@@ -1153,80 +833,68 @@ class PropertyPanel(QWidget):
         self.ctrl_color.setStyleSheet(f"background-color: {color.name()};")
         self.spin_alpha.setValue(selection.alpha_blend)
 
-        # 更新可见性
         enable = selection.mode_blend != const.BlendMode.NONE
         self.ctrl_color.setEnabled(enable)
-
         enable_alpha = selection.mode_blend == const.BlendMode.ALPHA
         self.spin_alpha.setVisible(enable_alpha)
         self.spin_alpha.setEnabled(enable_alpha)
 
     def reset_icon(self):
-        """重置图标"""
         self.panel_selection.reset_icon()
 
 
-# ===== 缩略图面板 =====
-class ThumbnailPanel(QScrollArea):
-    """素材缩略图显示面板 - 动态列数"""
+class ThumbnailPanel(QWidget):
     MARGIN = 5
-    THUMB_SIZE = (80, 80)
     ICON_SIZE = (100, 100)
-    ICON_WIDTH, ICON_HEIGHT = ICON_SIZE
-    CAPTION_HEIGHT = 26
-    CAPTION_SIZE = (ICON_WIDTH, CAPTION_HEIGHT)
-    CELL_WIDTH = ICON_WIDTH + MARGIN * 2
-    CELL_HEIGHT = ICON_HEIGHT + CAPTION_HEIGHT + MARGIN * 2
 
     def __init__(self, parent, path, on_dialog):
         super().__init__(parent)
         self.parent_widget = parent
-        self.path = path
         self.on_dialog = on_dialog
-        self.errors = []
+        
+        self.list_widget = QListWidget()
+        self.list_widget.setViewMode(QListWidget.ViewMode.IconMode)
+        self.list_widget.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.list_widget.setIconSize(QSize(*self.ICON_SIZE))
+        self.list_widget.setMovement(QListWidget.Movement.Static)
+        self.list_widget.setSpacing(self.MARGIN)
+        self.list_widget.setWordWrap(True)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.list_widget)
 
-        self.setWidgetResizable(True)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-
-        self.container = QWidget()
-        self.container.setStyleSheet("background-color: white;")
-        self.setWidget(self.container)
-
-        self.layout = QGridLayout(self.container)
-        self.layout.setSpacing(self.MARGIN)
-        self.layout.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
-        self.layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-
-        self._items = []
-        self._cols = 4
+        self.list_widget.itemClicked.connect(self.on_click_left)
+        self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list_widget.customContextMenuRequested.connect(self.on_click_right)
 
         self.show_button(path)
 
-    # ===== 数据收集 =====
-
     def show_button(self, path):
-        """收集所有素材，存到 self._items，然后重新布局"""
+        self.list_widget.clear()
         if path.is_dir():
-            self._items = self._collect_dir(path)
+            items = self._collect_dir(path)
         else:
-            self._items = self._collect_frames(path)
+            items = self._collect_frames(path)
 
-        self._cols = self._recalc_cols()
-        self._relayout()
+        for path_image, pil_image, frames in items:
+            pixmap = const.pil_to_qpixmap(pil_image)
+            text = const.DIC_ALIAS.get(path_image.stem, display(path_image.stem))
+            item = QListWidgetItem(QIcon(pixmap), text)
+            item.setData(Qt.ItemDataRole.UserRole, (path_image, frames))
+            item.setToolTip(self._tooltip_for(path_image))
+            self.list_widget.addItem(item)
 
     def _collect_dir(self, path_folder):
         lst_path = self.get_lst_path(path_folder)
         items = []
         lst_path_sep = []
-
         for path in lst_path:
             if self.is_target_separate(path):
                 lst_path_sep.append(path)
             else:
                 pil_img = self.get_thumb_image(path)
-                if pil_img is None:
-                    continue
+                if pil_img is None: continue
                 items.append((path, pil_img, None))
 
         for path in lst_path_sep:
@@ -1234,17 +902,11 @@ class ThumbnailPanel(QScrollArea):
                 icon = editor.create_icon(im_sep, self.ICON_SIZE, self.THUMB_SIZE, const.BG_PHOTO)
                 frames = [im_sep]
                 items.append((path_sep, icon, frames))
-
         return items
 
     def _collect_frames(self, path_image):
         frames = editor.get_frames(path_image)
-        if not frames:
-            message = _("{name}が開けません！").format(name=path_image.name)
-            caption = _("ファイルアクセスエラー")
-            qtlib.post_info(self.window(), message, caption, QMessageBox.Icon.Critical)
-            return []
-
+        if not frames: return []
         items = []
         for ix, frame in enumerate(frames):
             path_frame = path_image.parent / f"{path_image.stem}【{ix + 1}】"
@@ -1253,99 +915,17 @@ class ThumbnailPanel(QScrollArea):
             items.append((path_frame, icon, images_frame))
         return items
 
-    # ===== 动态布局 =====
-
-    def _recalc_cols(self):
-        """根据 viewport 宽度算列数"""
-        width = self.viewport().width()
-        if width <= 0:
-            return self._cols
-        cols = max(1, (width - self.MARGIN) // self.CELL_WIDTH)
-        return cols
-
-    def _relayout(self):
-        """按当前列数重新布局"""
-        while self.layout.count():
-            item = self.layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.setParent(None)
-                w.deleteLater()
-
-        cols = self._cols
-        for ix, (path_image, pil_image, frames) in enumerate(self._items):
-            row = ix // cols
-            col = ix % cols
-            widget = self._create_item_widget(path_image, pil_image, frames)
-            self.layout.addWidget(widget, row, col)
-
     def _tooltip_for(self, path_image) -> str:
-        """目录：若名字含'行'，列出该目录下所有素材名（翻译后）；
-        其他目录显示目录名翻译；文件显示文件名翻译。"""
         if not path_image.is_dir():
             return const.DIC_ALIAS.get(path_image.stem, display(path_image.stem))
-
-        # 目录
         if "行" in path_image.stem:
             lines = [_("存在的角色素材:")]
             try:
                 for entry in sorted(path_image.iterdir()):
                     lines.append("    " + display(entry.stem))
-            except OSError:
-                pass
+            except OSError: pass
             return "\n".join(lines)
-
-        # 其他目录
         return const.DIC_ALIAS.get(path_image.stem, display(path_image.stem))
-
-    def _create_item_widget(self, path_image, pil_image, frames):
-        widget = QWidget()
-        widget.setFixedSize(self.CELL_WIDTH, self.CELL_HEIGHT)
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
-
-        btn = QPushButton()
-        pixmap = self.pil_to_qpixmap(pil_image)
-        btn.setIcon(QIcon(pixmap))
-        btn.setIconSize(QSize(*self.ICON_SIZE))
-        btn.setToolTip(self._tooltip_for(path_image))
-        btn.setFixedSize(*self.ICON_SIZE)
-        btn.clicked.connect(self.on_click_left(path_image, frames))
-
-        if not path_image.is_dir():
-            btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-            btn.customContextMenuRequested.connect(self.on_click_right(path_image, frames))
-
-        label = QLabel(const.DIC_ALIAS.get(path_image.stem, display(path_image.stem)))
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setFixedSize(*self.CAPTION_SIZE)
-        label.setWordWrap(True)
-
-        layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(label, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        return widget
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if not self._items:
-            return
-        new_cols = self._recalc_cols()
-        if new_cols != self._cols:
-            self._cols = new_cols
-            self._relayout()
-
-    # ===== 以下不变 =====
-
-    def pil_to_qpixmap(self, pil_image):
-        if pil_image is None:
-            return QPixmap()
-        if pil_image.mode != 'RGBA':
-            pil_image = pil_image.convert('RGBA')
-        data = pil_image.tobytes("raw", "RGBA")
-        qimage = QImage(data, pil_image.width, pil_image.height, QImage.Format.Format_RGBA8888).copy()
-        return QPixmap.fromImage(qimage)
 
     def get_lst_path(self, path_folder):
         lst_path_folder = []
@@ -1415,24 +995,23 @@ class ThumbnailPanel(QScrollArea):
         is_sep = any(word in path.stem for word in const.KEYWORDS_SEPARATE)
         return is_collage and is_sep
 
-    def on_click_left(self, path, frames=None):
-        def inner():
-            if path.is_dir():
-                qtlib.post_select(self.parent_widget, path)
-                return
+    def on_click_left(self, item):
+        path, frames = item.data(Qt.ItemDataRole.UserRole)
+        if path.is_dir():
+            qtlib.post_select(self.parent_widget, path)
+        else:
             qtlib.post_append(self.window(), path_image=path, frames=frames)
-        return inner
 
-    def on_click_right(self, path, frames):
-        def inner(pos):
+    def on_click_right(self, pos):
+        item = self.list_widget.itemAt(pos)
+        if not item: return
+        path, frames = item.data(Qt.ItemDataRole.UserRole)
+        if not path.is_dir():
             menu = menus.AppendMenu(self.parent_widget, path, frames, None)
-            menu.exec(self.mapToGlobal(pos))
-        return inner
+            menu.exec(self.list_widget.mapToGlobal(pos))
 
 
-# ===== 图像追加面板 =====
 class ImageAppendPanel(QWidget):
-    """图像追加面板"""
     ORDER_BTN = [
         const.ImageType.BASE, const.ImageType.COSTUME, const.ImageType.FACE,
         const.ImageType.BROWS, const.ImageType.EYES, const.ImageType.MOUTH,
@@ -1445,18 +1024,14 @@ class ImageAppendPanel(QWidget):
         self.on_dialog = on_dialog
         path_init = path_init if path_init else const.FOLDER_MATERIAL / const.ImageType.BASE
 
-        # 缩略图面板
         self.panel_thumb = ThumbnailPanel(self, path_init, on_dialog)
 
-        # 主布局
         group = QGroupBox(caption)
         layout = QVBoxLayout(group)
 
-        # 按钮行
         btn_layout = QHBoxLayout()
         import_layout = QVBoxLayout()
 
-        # 分类按钮
         for parts in self.ORDER_BTN:
             icon_path = const.FOLDER_WIDGET / f"{parts}.png"
             if icon_path.exists():
@@ -1470,7 +1045,6 @@ class ImageAppendPanel(QWidget):
                 btn.clicked.connect(self.on_select_btn(folder_parts))
                 btn_layout.addWidget(btn)
 
-        # 导入按钮
         import_icon = const.PATH_BTN_IMPORT
         if import_icon.exists():
             pixmap = QPixmap(str(import_icon))
@@ -1485,7 +1059,6 @@ class ImageAppendPanel(QWidget):
         btn_layout.addLayout(import_layout)
         layout.addLayout(btn_layout)
 
-        # 缩略图
         self.thumb_layout = QVBoxLayout()
         self.thumb_layout.addWidget(self.panel_thumb)
         layout.addLayout(self.thumb_layout)
@@ -1493,38 +1066,30 @@ class ImageAppendPanel(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(group)
 
-        # 连接选择信号
-        # 使用信号系统
         signals.select.connect(self.on_select_thumb)
 
     def on_select_btn(self, path_folder):
-        """选择分类按钮"""
         def inner():
-            self.panel_thumb.deleteLater()
+            if hasattr(self, 'panel_thumb') and self.panel_thumb:
+                self.thumb_layout.removeWidget(self.panel_thumb)
+                self.panel_thumb.deleteLater()
             self.panel_thumb = ThumbnailPanel(self, path_folder, self.on_dialog)
-            # 替换缩略图
-            for i in reversed(range(self.thumb_layout.count())):
-                self.thumb_layout.itemAt(i).widget().deleteLater()
             self.thumb_layout.addWidget(self.panel_thumb)
         return inner
 
     def on_select_thumb(self, data):
-        """选择缩略图"""
         path = data.get('path')
         if path and path.is_dir() and self.exceeded_display_limit(path):
-            message = _("選択したフォルダ直下の画像が多すぎます!\n500件以下になるよう減らしてください!")
-            caption = _("読込件数オーバー")
-            qtlib.post_info(self.window(), message, caption, QMessageBox.Icon.Warning)
+            qtlib.post_info(self.window(), _("選択したフォルダ直下の画像が多すぎます!\n500件以下になるよう減らしてください!"), _("読込件数オーバー"), QMessageBox.Icon.Warning)
             return
 
-        self.panel_thumb.deleteLater()
+        if hasattr(self, 'panel_thumb') and self.panel_thumb:
+            self.thumb_layout.removeWidget(self.panel_thumb)
+            self.panel_thumb.deleteLater()
         self.panel_thumb = ThumbnailPanel(self, path, self.on_dialog)
-        for i in reversed(range(self.thumb_layout.count())):
-            self.thumb_layout.itemAt(i).widget().deleteLater()
         self.thumb_layout.addWidget(self.panel_thumb)
 
     def exceeded_display_limit(self, path_folder):
-        """检查是否超过显示限制"""
         counter = 0
         for _ in path_folder.iterdir():
             counter += 1
@@ -1533,53 +1098,41 @@ class ImageAppendPanel(QWidget):
         return False
 
     def on_import(self):
-        """导入图像"""
         wildcard = ";;".join([f"{ext.upper().replace('.', '')} files (*{ext})" for ext in const.SUFFIXES_IMAGE])
         path_image = qtlib.select_file(self, _("取り込みたい画像を選択してください。"), wildcard)
         if path_image:
             qtlib.post_append(self.window(), path_image)
 
 
-# ===== 组件面板 =====
 class ComponentPanel(QWidget):
-    """组件面板 - 包含文件列表和树形结构"""
     def __init__(self, parent):
         super().__init__(parent)
         self.target_post = parent.window() if hasattr(parent, 'window') else parent
-
-        # 创建标签页
         self.tab_widget = QTabWidget()
         self.page_file = QWidget()
         self.page_parts = QWidget()
 
-        # 文件列表
         self.flc = FileListCtrl(self.page_file)
         file_layout = QVBoxLayout(self.page_file)
         file_layout.addWidget(self.flc)
         self.page_file.setLayout(file_layout)
 
-        # 树形结构
         self.tree = PartsTreeCtrl(self.page_parts)
         parts_layout = QVBoxLayout(self.page_parts)
         parts_layout.addWidget(self.tree)
         self.page_parts.setLayout(parts_layout)
 
-        # 添加到标签页
         self.tab_widget.tabBar().setExpanding(True)
         self.tab_widget.addTab(self.page_file, _("画像一覧"))
         self.tab_widget.addTab(self.page_parts, _("詳細構成"))
 
-        # 主布局
         layout = QVBoxLayout(self)
         layout.addWidget(self.tab_widget)
         self.setLayout(layout)
 
-        # 连接标签页切换信号
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
 
     def update_display(self):
-        """更新显示"""
-        # 根据选择状态切换标签页
         if CONFIG.manager.selected_file:
             self.tab_widget.setCurrentIndex(0)
         else:
@@ -1589,29 +1142,22 @@ class ComponentPanel(QWidget):
         self.tree.update_display()
 
     def reset_icon(self):
-        """重置图标"""
         self.flc.reset_icon()
         self.tree.reset_icon()
 
     def on_tab_changed(self, index):
-        """标签页切换"""
         selected_file = index == 0
         CONFIG.manager.switch_selected_file(selected_file)
         qtlib.post_update(self.window(), preview=True, prop=True)
 
 
-# ===== 整体属性面板 =====
 class CompositePanel(QWidget):
-    """整体属性面板 - 控制帧数、大小、滤镜、保存等"""
     def __init__(self, parent):
         super().__init__(parent)
         self.target_post = parent.window() if hasattr(parent, 'window') else parent
-
-        # 创建主组
         group = QGroupBox(_("全体プロパティ"))
         layout = QVBoxLayout(group)
 
-        # ---- 帧数 ----
         frame_layout = QHBoxLayout()
         self.check_fixed_frames = QCheckBox(_("フレーム数"))
         self.spin_num_frames = QSpinBox()
@@ -1623,7 +1169,6 @@ class CompositePanel(QWidget):
         frame_layout.addStretch()
         layout.addLayout(frame_layout)
 
-        # ---- 图像大小 ----
         size_layout = QHBoxLayout()
         self.check_fixed_size = QCheckBox(_("画像サイズ"))
         self.spin_width = QSpinBox()
@@ -1645,7 +1190,6 @@ class CompositePanel(QWidget):
         size_layout.addStretch()
         layout.addLayout(size_layout)
 
-        # ---- 显示间隔 ----
         duration_layout = QVBoxLayout()
         radio_layout = QHBoxLayout()
         radio_layout.addWidget(QLabel(_("表示間隔(ms)")))
@@ -1662,7 +1206,6 @@ class CompositePanel(QWidget):
         self.spin_duration.setValue(100)
         duration_layout.addWidget(self.spin_duration)
 
-        # 多帧网格
         self.grid_duration = QTableWidget(1, 1)
         self.grid_duration.setHorizontalHeaderLabels([_("【F1】")])
         self.grid_duration.hide()
@@ -1671,7 +1214,6 @@ class CompositePanel(QWidget):
 
         layout.addLayout(duration_layout)
 
-        # ---- 滤镜 ----
         filter_layout = QHBoxLayout()
         filter_layout.addWidget(QLabel(_("色フィルタ:")))
         self.combo_filter_color = QComboBox()
@@ -1689,7 +1231,6 @@ class CompositePanel(QWidget):
         filter_layout.addStretch()
         layout.addLayout(filter_layout)
 
-        # ---- 保存 ----
         save_layout = QHBoxLayout()
         self.combo_save = QComboBox()
         for mode in const.MODES_SAVE:
@@ -1703,12 +1244,10 @@ class CompositePanel(QWidget):
         save_layout.addWidget(self.btn_clear)
         layout.addLayout(save_layout)
 
-        # 主布局
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(group)
         self.setLayout(main_layout)
 
-        # ---- 信号连接 ----
         self.check_fixed_frames.stateChanged.connect(self.on_check_frames)
         self.spin_num_frames.valueChanged.connect(self.on_spin_frames)
         self.check_fixed_size.stateChanged.connect(self.on_check_size)
@@ -1726,7 +1265,6 @@ class CompositePanel(QWidget):
         self.update_display()
 
     def update_display(self):
-        """更新显示"""
         self.check_fixed_frames.setChecked(CONFIG.manager.fixed_number_frames)
         self.spin_num_frames.setEnabled(CONFIG.manager.fixed_number_frames)
         self.spin_num_frames.setValue(CONFIG.manager.number_frames)
@@ -1740,7 +1278,6 @@ class CompositePanel(QWidget):
 
         self.spin_duration.setValue(CONFIG.manager.duration_single)
 
-        # 更新网格
         num_frames = CONFIG.manager.number_frames
         current_cols = self.grid_duration.columnCount()
         if num_frames > current_cols:
@@ -1753,7 +1290,6 @@ class CompositePanel(QWidget):
                 self.grid_duration.setHorizontalHeaderItem(ix, QTableWidgetItem(_("【F{num}】").format(num=ix + 1)))
                 self.grid_duration.setItem(0, ix, QTableWidgetItem(str(d)))
 
-        # 更新滤镜
         self.combo_filter_color.setCurrentIndex(self.combo_filter_color.findData(CONFIG.manager.filter_color))
         self.combo_filter_image.setCurrentIndex(self.combo_filter_image.findData(CONFIG.manager.filter_image))
 
