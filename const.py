@@ -15,6 +15,8 @@
 
 import sys
 import pathlib
+import os
+import hashlib
 from dataclasses import dataclass, fields
 from PIL import Image
 import numpy as np
@@ -23,6 +25,28 @@ from PySide6.QtGui import QImage, QFontDatabase, QPixmap
 
 
 VERSION = "3.0.1" # 随便填的，删掉之前记得调查引用
+
+
+def get_cache_dir():
+    """获取跨平台的缓存目录。Linux 优先用 /tmp，Windows 用系统 Cache"""
+    if sys.platform != "win32" and os.path.exists("/tmp"):
+        # Linux 下直接用 /tmp (通常是内存盘 tmpfs)
+        cache_dir = pathlib.Path("/tmp") / "TanukiMaker_thumb_cache"
+    else:
+        # Windows/macOS 下用用户缓存目录
+        cache_dir = pathlib.Path(QStandardPaths.writableLocation(QStandardPaths.CacheLocation))
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+# 全局初始化一次
+CACHE_DIR = get_cache_dir()
+
+def get_thumb_cache_path(path_image):
+    """根据文件路径生成 MD5 缓存文件名"""
+    hash_name = hashlib.md5(str(path_image.resolve()).encode('utf-8')).hexdigest()
+    return CACHE_DIR / f"{hash_name}.png"
+
 
 # ===== 图像逻辑尺寸（影响合成结果，不要为了 UI 随便改）=====
 DEFAULT_SIZE = (500, 500)

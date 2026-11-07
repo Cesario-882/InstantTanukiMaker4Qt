@@ -16,15 +16,19 @@
 import numpy as np
 import threading
 from pathlib import Path
+from PIL import Image
 
 from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton,
     QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QRadioButton,
-    QTabWidget, QScrollArea, QSizePolicy, QGridLayout, 
+    QTabWidget, QScrollArea, QSizePolicy, QGridLayout,
     QTableWidget, QTableWidgetItem, QGroupBox, QMessageBox,
     QListView, QTreeView, QStyledItemDelegate, QStyle, QListWidget, QListWidgetItem
 )
-from PySide6.QtCore import Qt, QTimer, QPoint, QSize, Signal, QAbstractListModel, QModelIndex
+from PySide6.QtCore import (
+    Qt, QTimer, QPoint, QSize, Signal, QAbstractListModel, QModelIndex,
+    QObject, QRunnable, QThreadPool, Slot
+)
 from PySide6.QtGui import QPixmap, QImage, QIcon, QMovie, QFont, QColor, QStandardItemModel, QStandardItem
 
 import const
@@ -34,6 +38,51 @@ import menus
 import qtlib
 from signals import signals
 from i18n import _, display
+
+
+# ===== 后台任务信号 =====
+class ThumbnailSignals(QObject):
+    finished = Signal(Path, QIcon, object)
+    error = Signal(Path, str)
+
+# ===== 后台任务执行体 =====
+class ThumbnailWorker(QRunnable):
+    def __init__(self, path_image, panel_instance, item_ref):
+        super().__init__()
+        self.path_image = path_image
+        self.panel = panel_instance
+        self.item_ref = item_ref
+        self.signals = ThumbnailSignals()
+        self.setAutoDelete(True)
+
+    @Slot()
+    def run(self):
+        try:
+            cache_file = const.get_thumb_cache_path(self.path_image)
+            icon = None
+
+            if cache_file.exists():
+                try:
+                    with Image.open(cache_file) as im:
+                        pil_img = im.convert("RGBA")
+                        icon = QIcon(const.pil_to_qpixmap(pil_img))
+                except Exception:
+                    try: cache_file.unlink()
+                    except: pass
+
+            if not icon:
+                pil_img = self.panel.get_thumb_image(self.path_image)
+                if pil_img:
+                    try: pil_img.save(cache_file, "PNG")
+                    except Exception: pass
+                    icon = QIcon(const.pil_to_qpixmap(pil_img))
+
+            if icon:
+                self.signals.finished.emit(self.path_image, icon, self.item_ref)
+            else:
+                self.signals.error.emit(self.path_image, "Failed to generate")
+        except Exception as e:
+            self.signals.error.emit(self.path_image, str(e))
 
 
 # ===== 图像显示组件 =====
@@ -76,25 +125,17 @@ class BitmapPanel(QWidget):
 
     def set_pil_image(self, pil_image):
         self.pil_image = pil_image
-        if pil_image is None:
-            return
-        # 兼容传入 QImage 或 QPixmap 的情况
-        if isinstance(pil_image, QPixmap):
-            self.set_pixmap(pil_image)
-        elif isinstance(pil_image, QImage):
-            self.set_pixmap(QPixmap.fromImage(pil_image))
-        else:
-            self.set_pixmap(const.pil_to_qpixmap(pil_image))
+        if pil_image is None: return
+        if isinstance(pil_image, QPixmap): self.set_pixmap(pil_image)
+        elif isinstance(pil_image, QImage): self.set_pixmap(QPixmap.fromImage(pil_image))
+        else: self.set_pixmap(const.pil_to_qpixmap(pil_image))
 
     def set_qimage(self, qimage):
-        if qimage is None or qimage.isNull():
-            self.set_pixmap(QPixmap())
-        else:
-            self.set_pixmap(QPixmap.fromImage(qimage))
+        if qimage is None or qimage.isNull(): self.set_pixmap(QPixmap())
+        else: self.set_pixmap(QPixmap.fromImage(qimage))
 
     def load_file(self, path_file: Path):
         try:
-            from PIL import Image
             pil_image = Image.open(path_file).convert("RGBA")
             self.set_pil_image(pil_image)
         except Exception:
@@ -103,18 +144,12 @@ class BitmapPanel(QWidget):
     def get_pixmap(self) -> QPixmap:
         return self.current_pixmap
 
-    def mousePressEvent(self, event):
-        pass
-
 
 class FocusDisplayPanel(BitmapPanel):
     def __init__(self, parent):
         super().__init__(parent)
-        im_focus_on = editor.open_image(const.PATH_FOCUS_ON).convert("RGBA")
-        im_focus_off = editor.open_image(const.PATH_FOCUS_OFF).convert("RGBA")
-        self.pil_focus_on = im_focus_on
-        self.pil_focus_off = im_focus_off
-
+        self.pil_focus_on = editor.open_image(const.PATH_FOCUS_ON).convert("RGBA")
+        self.pil_focus_off = editor.open_image(const.PATH_FOCUS_OFF).convert("RGBA")
         self.set_pil_image(self.pil_focus_off)
         self.label.setToolTip(_("キー受付"))
         self.label.mousePressEvent = self.on_click
@@ -128,8 +163,7 @@ class FocusDisplayPanel(BitmapPanel):
             parent = parent.parent()
 
     def set_focus(self, is_focused):
-        pil_img = self.pil_focus_on if is_focused else self.pil_focus_off
-        self.set_pil_image(pil_img)
+        self.set_pil_image(self.pil_focus_on if is_focused else self.pil_focus_off)
 
 
 class FrameNumberDisplayPanel(BitmapPanel):
@@ -147,83 +181,96 @@ class FrameNumberDisplayPanel(BitmapPanel):
         ix_frame = CONFIG.manager.ix_frame + 1
         num_frame = CONFIG.manager.number_frames
         text_display = f"{ix_frame}/{num_frame}"
-        size_font = (const.DISPLAY_FONT_DOUBLE_SIZE if num_frame >= 10 else
-                     const.DISPLAY_FONT_SINGLE_SIZE)
-        im_draw = editor.draw_text(self.im_display, text_display, size_font,
-                                   const.PATH_FONT_GENEI, (0, 0, 0), const.DISPLAY_BBOX)
+        size_font = const.DISPLAY_FONT_DOUBLE_SIZE if num_frame >= 10 else const.DISPLAY_FONT_SINGLE_SIZE
+        im_draw = editor.draw_text(self.im_display, text_display, size_font, const.PATH_FONT_GENEI, (0, 0, 0), const.DISPLAY_BBOX)
         self.set_pil_image(im_draw)
 
     def on_click(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            ix_delta = -1
-        elif event.button() == Qt.MouseButton.RightButton:
-            ix_delta = 1
-        else:
-            return
+        if event.button() == Qt.MouseButton.LeftButton: ix_delta = -1
+        elif event.button() == Qt.MouseButton.RightButton: ix_delta = 1
+        else: return
         CONFIG.manager.shift_ix_frame(ix_delta)
+        
+        parent = self.parent()
+        while parent:
+            if isinstance(parent, PreviewPanel):
+                parent.stop_animation()
+                break
+            parent = parent.parent()
         qtlib.post_update(self.window(), True, True, True)
 
 
 class SelectionMarkerStatusPanel(BitmapPanel):
     def __init__(self, parent):
         super().__init__(parent)
-        im_mark_on = editor.open_image(const.PATH_MARK_ON).convert("RGBA")
-        im_mark_off = editor.open_image(const.PATH_MARK_OFF).convert("RGBA")
-        self.pil_mark_on = im_mark_on
-        self.pil_mark_off = im_mark_off
-
+        self.pil_mark_on = editor.open_image(const.PATH_MARK_ON).convert("RGBA")
+        self.pil_mark_off = editor.open_image(const.PATH_MARK_OFF).convert("RGBA")
         self.set_pil_image(self.pil_mark_off)
         self.label.setToolTip(_("マーカー表示"))
         self.label.mousePressEvent = self.on_left
 
     def update_display(self):
         marked = CONFIG.manager.marked_selection
-        pil_img = self.pil_mark_on if marked else self.pil_mark_off
-        tooltip = _("マーカー非表示") if marked else _("マーカー表示")
-        self.label.setToolTip(tooltip)
-        self.set_pil_image(pil_img)
+        self.label.setToolTip(_("マーカー非表示") if marked else _("マーカー表示"))
+        self.set_pil_image(self.pil_mark_on if marked else self.pil_mark_off)
 
     def on_left(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            if CONFIG.manager.can_marking():
-                CONFIG.manager.switch_marking()
-                qtlib.post_update(self.window(), preview=True)
+        if event.button() == Qt.MouseButton.LeftButton and CONFIG.manager.can_marking():
+            CONFIG.manager.switch_marking()
+            qtlib.post_update(self.window(), preview=True)
 
 
 class PlayingStatusPanel(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
         self.is_playing = False
-        self.panel_pause = BitmapPanel(self, path_file=const.PATH_PAUSE)
-        self.panel_pause.label.setToolTip(_("再生"))
-        self.panel_pause.label.mousePressEvent = self.on_play
-        self.anim_label = QLabel()
-        self.anim_label.setToolTip(_("停止"))
-        self.anim_label.hide()
-        self.anim_label.mousePressEvent = self.on_pause
+
+        # 使用最基础的 QLabel
+        self.btn_label = QLabel()
+        self.btn_label.setFixedSize(32, 32) # 死死锁住大小
+        self.btn_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_label.setAlignment(Qt.AlignmentFlag.AlignCenter) # 居中对齐
+
+        # 设置图标，强制平滑缩放
+        self.icon_play = QPixmap(str(const.PATH_PAUSE))
+        self.icon_stop = QPixmap(str(const.PATH_PLAYING))
+
+        # 这一步极其重要：如果不加，图标过大就会显示不全或者变成黑点
+        self.icon_play = self.icon_play.scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        self.icon_stop = self.icon_stop.scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
 
         layout = QHBoxLayout(self)
-        layout.addWidget(self.panel_pause)
-        layout.addWidget(self.anim_label)
+        layout.addWidget(self.btn_label)
         layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
-    def on_play(self, event):
-        if not CONFIG.manager.can_save():
-            qtlib.post_info(self.window(), _("画像が表示されていません！"), _("画像未表示"), QMessageBox.Icon.Warning)
-            return
-        qtlib.post_play(self.window())
+        self.set_playing(False)
+        self.btn_label.mousePressEvent = self.on_click
 
-    def on_pause(self, event):
-        qtlib.post_update(self.window(), preview=True)
+    def set_playing(self, is_playing):
+        self.is_playing = is_playing
+        if is_playing:
+            self.btn_label.setPixmap(self.icon_stop)
+            self.btn_label.setToolTip(_("停止"))
+        else:
+            self.btn_label.setPixmap(self.icon_play)
+            self.btn_label.setToolTip(_("再生"))
 
-    def play(self):
-        self.panel_pause.hide()
-        self.anim_label.show()
-
-    def pause(self):
-        self.anim_label.hide()
-        self.panel_pause.show()
+    def on_click(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self.is_playing:
+                parent = self.parent()
+                while parent:
+                    if isinstance(parent, PreviewPanel):
+                        parent.stop_animation()
+                        break
+                    parent = parent.parent()
+                qtlib.post_update(self.window(), preview=True)
+            else:
+                if not CONFIG.manager.can_save():
+                    qtlib.post_info(self.window(), _("画像が表示されていません！"), _("画像未表示"), QMessageBox.Icon.Warning)
+                    return
+                qtlib.post_play(self.window())
 
 
 class HeaderPanel(QWidget):
@@ -245,10 +292,7 @@ class HeaderPanel(QWidget):
     def update_display(self):
         self.panel_display_num.update_display()
         self.panel_marker.update_display()
-        self.panel_playing.pause()
-
-    def play(self):
-        self.panel_playing.play()
+        self.panel_playing.set_playing(False)
 
     def set_focus(self, is_focused):
         self.panel_focus.set_focus(is_focused)
@@ -277,16 +321,15 @@ class PreviewPanel(QWidget):
 
         self.pos_start = QPoint(0, 0)
         self.is_dragging = False
-        self.thread_loading = None
+
         self.delay_update = QTimer()
         self.delay_update.setSingleShot(True)
         self.delay_update.timeout.connect(self.start_loading)
-        
+
         self.movie = None
         self.current_task_id = 0
-
         self.frame_loaded.connect(self.show_frame)
-        
+
         self.sbmp_preview.mousePressEvent = self.on_left
         self.sbmp_preview.mouseDoubleClickEvent = self.on_left
         self.sbmp_preview.mouseReleaseEvent = self.on_up
@@ -311,12 +354,19 @@ class PreviewPanel(QWidget):
         if task_id == self.current_task_id:
             self.frame_loaded.emit(image_preview)
 
-    def show_frame(self, image_preview):
-        if image_preview is None:
-            return
+    def stop_animation(self):
         if self.movie:
             self.movie.stop()
             self.movie = None
+        self.anime_preview.hide()
+        self.sbmp_preview.show()
+        self.panel_header.panel_playing.set_playing(False)
+
+    def show_frame(self, image_preview):
+        if image_preview is None: return
+
+        if self.movie and self.movie.state() == QMovie.MovieState.Running:
+            self.stop_animation()
 
         pixmap = const.pil_to_qpixmap(image_preview)
         self.sbmp_preview.setPixmap(pixmap)
@@ -325,10 +375,26 @@ class PreviewPanel(QWidget):
         self.anime_preview.hide()
         qtlib.post_layout(self.window())
 
+    def show_animation(self):
+        if self.movie:
+            self.movie.stop()
+            self.movie = None
+
+        path_gif = const.PATH_GIF_PREVIEW
+        if not path_gif.exists(): return
+
+        self.movie = QMovie(str(path_gif))
+        self.movie.setCacheMode(QMovie.CacheMode.CacheAll)
+        self.anime_preview.setMovie(self.movie)
+
+        self.sbmp_preview.hide()
+        self.anime_preview.show()
+        self.movie.start()
+        self.panel_header.panel_playing.set_playing(True)
+
     def on_left(self, event):
         pos = event.position().toPoint()
-        pos_np = np.array([pos.x(), pos.y()])
-        is_collide = CONFIG.manager.select_by_pos(pos_np, event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        is_collide = CONFIG.manager.select_by_pos(np.array([pos.x(), pos.y()]), event.modifiers() & Qt.KeyboardModifier.ControlModifier)
         if is_collide:
             self.is_dragging = True
             self.pos_start = pos
@@ -336,22 +402,21 @@ class PreviewPanel(QWidget):
 
     def on_motion(self, event):
         self.sbmp_preview.setFocus()
-        if not self.is_dragging:
-            return
+        if not self.is_dragging: return
         pos_cur = event.position().toPoint()
         offset = pos_cur - self.pos_start
         self.pos_start = pos_cur
         CONFIG.manager.add_offset(np.array([offset.x(), offset.y()]))
         qtlib.post_update(self.window(), preview=True, prop=True)
 
-    def on_up(self, event):
-        self.is_dragging = False
+    def on_up(self, event): self.is_dragging = False
 
     def on_press(self, event):
         key = event.key()
         if key == Qt.Key.Key_Tab:
             ix_delta = -1 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1
             CONFIG.manager.shift_ix_frame(ix_delta)
+            self.stop_animation()
             qtlib.post_update(self.window(), True, True, True)
             return
         elif key == Qt.Key.Key_Escape:
@@ -359,8 +424,7 @@ class PreviewPanel(QWidget):
             qtlib.post_update(self.window(), True, True, True)
             return
 
-        if not CONFIG.manager.is_selected():
-            return
+        if not CONFIG.manager.is_selected(): return
 
         direction = {
             Qt.Key.Key_Up: np.array((0, -1)), Qt.Key.Key_W: np.array((0, -1)),
@@ -368,9 +432,7 @@ class PreviewPanel(QWidget):
             Qt.Key.Key_Left: np.array((-1, 0)), Qt.Key.Key_A: np.array((-1, 0)),
             Qt.Key.Key_Right: np.array((1, 0)), Qt.Key.Key_D: np.array((1, 0)),
         }.get(key)
-
-        if direction is None:
-            return
+        if direction is None: return
 
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             direction = direction * 5
@@ -378,51 +440,28 @@ class PreviewPanel(QWidget):
         qtlib.post_update(self.window(), preview=True, prop=True)
 
     def on_wheel(self, event):
-        if not CONFIG.manager.is_selected():
-            return
+        if not CONFIG.manager.is_selected(): return
         delta = event.angleDelta().y()
         rate_angle = 10 if event.modifiers() & Qt.KeyboardModifier.ControlModifier else 1
         angle_delta = -1 if delta < 0 else 1
         CONFIG.manager.add_angle(angle_delta * rate_angle)
         qtlib.post_update(self.window(), preview=True, prop=True)
 
-    def show_animation(self):
-        if self.movie:
-            self.movie.stop()
-            self.movie = None
-        path_gif = const.PATH_GIF_PREVIEW
-        if not path_gif.exists():
-            return
-        self.movie = QMovie(str(path_gif))
-        self.movie.setCacheMode(QMovie.CacheMode.CacheAll)
-        self.anime_preview.setMovie(self.movie)
-        self.anime_preview.show()
-        self.sbmp_preview.hide()
-        self.movie.start()
-
 
 class FileListModel(QAbstractListModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.files = []
-        self.placeholder_icon = QIcon(QPixmap(48, 48))
 
-    def rowCount(self, parent=QModelIndex()):
-        return len(self.files)
+    def rowCount(self, parent=QModelIndex()): return len(self.files)
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if not index.isValid():
-            return None
+        if not index.isValid(): return None
         file = self.files[index.row()]
-
-        if role == Qt.ItemDataRole.DisplayRole:
-            return file.label
-        elif role == Qt.ItemDataRole.DecorationRole:
-            return QIcon(file.get_qpixmap_icon())
-        elif role == Qt.ItemDataRole.CheckStateRole:
-            return Qt.CheckState.Checked if file.visible else Qt.CheckState.Unchecked
-        elif role == Qt.ItemDataRole.UserRole:
-            return file.id_file
+        if role == Qt.ItemDataRole.DisplayRole: return file.label
+        elif role == Qt.ItemDataRole.DecorationRole: return QIcon(file.get_qpixmap_icon())
+        elif role == Qt.ItemDataRole.CheckStateRole: return Qt.CheckState.Checked if file.visible else Qt.CheckState.Unchecked
+        elif role == Qt.ItemDataRole.UserRole: return file.id_file
         return None
 
     def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
@@ -464,8 +503,7 @@ class FileListCtrl(QListView):
         self.model.dataChanged.connect(self.on_data_changed)
 
     def update_display(self):
-        files = CONFIG.manager.get_order_file_display()
-        self.model.update_files(files)
+        self.model.update_files(CONFIG.manager.get_order_file_display())
 
     def on_item_clicked(self, index):
         id_file = index.data(Qt.ItemDataRole.UserRole)
@@ -473,8 +511,7 @@ class FileListCtrl(QListView):
             CONFIG.manager.select(None, id_file, False)
             qtlib.post_update(self.window(), preview=True, prop=True)
 
-    def on_item_double_clicked(self, index):
-        pass
+    def on_item_double_clicked(self, index): pass
 
     def on_data_changed(self, top_left, bottom_right, roles):
         if Qt.ItemDataRole.CheckStateRole in roles:
@@ -484,16 +521,13 @@ class FileListCtrl(QListView):
                 CONFIG.manager.set_file_visible(id_file, visible)
                 qtlib.post_update(self.window(), preview=True, component=True)
 
-    def reset_icon(self):
-        self.model.update_files([])
+    def reset_icon(self): self.model.update_files([])
 
     def contextMenuEvent(self, event):
         index = self.indexAt(event.pos())
-        if not index.isValid(): return
-        id_file = index.data(Qt.ItemDataRole.UserRole)
-        if id_file:
-            menu = menus.ComponentMenu(self.target_post, id_file)
-            menu.exec(event.globalPos())
+        if index.isValid():
+            id_file = index.data(Qt.ItemDataRole.UserRole)
+            if id_file: menus.ComponentMenu(self.target_post, id_file).exec(event.globalPos())
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Delete:
@@ -539,24 +573,18 @@ class PartsTreeCtrl(QTreeView):
                 parts_item.setData(parts.id_parts, Qt.ItemDataRole.UserRole)
                 parts_item.setCheckable(True)
                 parts_item.setCheckState(Qt.CheckState.Checked if parts.visible else Qt.CheckState.Unchecked)
-                
                 frame_item.appendRow(parts_item)
 
             self.model.appendRow(frame_item)
-
-            if ix_selection == ix:
-                self.expand(frame_item.index())
+            if ix_selection == ix: self.expand(frame_item.index())
 
     def contextMenuEvent(self, event):
         index = self.indexAt(event.pos())
-        if not index.isValid(): return
-        data = index.data(Qt.ItemDataRole.UserRole)
-        if data and not isinstance(data, int):
-            menu = menus.ComponentMenu(self.target_post, data)
-            menu.exec(event.globalPos())
+        if index.isValid():
+            data = index.data(Qt.ItemDataRole.UserRole)
+            if data and not isinstance(data, int): menus.ComponentMenu(self.target_post, data).exec(event.globalPos())
 
-    def reset_icon(self):
-        self.model.clear()
+    def reset_icon(self): self.model.clear()
 
 
 class SelectionViewerPanel(QScrollArea):
@@ -577,7 +605,6 @@ class SelectionViewerPanel(QScrollArea):
 
         self.text_selected = QLabel(_("未選択"))
         self.layout.addWidget(self.text_selected)
-
         self.create_icon(const.UNSELECTED_QIMAGE)
 
     def update_display(self):
@@ -589,50 +616,38 @@ class SelectionViewerPanel(QScrollArea):
             self.text_selected.setText(_("未選択"))
             lst_id_selection.append(None)
         elif count_selection == 1:
-            label = CONFIG.manager.get_image(lst_id_selection[0]).label
             self.text_selected.show()
-            self.text_selected.setText(label)
+            self.text_selected.setText(CONFIG.manager.get_image(lst_id_selection[0]).label)
         else:
             self.text_selected.hide()
 
-        if set(self.lst_id) == set(lst_id_selection):
-            return
+        if set(self.lst_id) == set(lst_id_selection): return
 
         for icon, id_exist, id_selection in zip(self.lst_icon, self.lst_id, lst_id_selection):
-            if id_exist == id_selection:
-                continue
+            if id_exist == id_selection: continue
             if id_selection is None:
                 icon.set_pil_image(const.BG_UNSELECTED)
                 continue
-            selection = CONFIG.manager.get_image(id_selection)
-            icon.set_pixmap(selection.get_qpixmap_icon())
+            icon.set_pixmap(CONFIG.manager.get_image(id_selection).get_qpixmap_icon())
 
-        num_selection = len(lst_id_selection)
-        num_exists = len(self.lst_id)
-
+        num_selection, num_exists = len(lst_id_selection), len(self.lst_id)
         if num_selection > num_exists:
-            images_selection = CONFIG.manager.get_images_selection()
-            for im in images_selection[num_exists:]:
+            for im in CONFIG.manager.get_images_selection()[num_exists:]:
                 self.create_icon(im.get_qpixmap_icon())
         elif num_selection < num_exists:
-            for panel in self.lst_icon[num_selection:]:
-                panel.deleteLater()
+            for panel in self.lst_icon[num_selection:]: panel.deleteLater()
             self.lst_icon = self.lst_icon[:num_selection]
-
         self.lst_id = lst_id_selection
 
     def create_icon(self, pil_or_qpixmap):
         panel_bmp = BitmapPanel(self)
-        if isinstance(pil_or_qpixmap, QPixmap):
-            panel_bmp.set_pixmap(pil_or_qpixmap)
-        else:
-            panel_bmp.set_pil_image(pil_or_qpixmap)
+        if isinstance(pil_or_qpixmap, QPixmap): panel_bmp.set_pixmap(pil_or_qpixmap)
+        else: panel_bmp.set_pil_image(pil_or_qpixmap)
         self.lst_icon.append(panel_bmp)
         self.layout.insertWidget(len(self.lst_icon) - 1, panel_bmp)
 
     def reset_icon(self):
-        for icon in self.lst_icon[1:]:
-            icon.deleteLater()
+        for icon in self.lst_icon[1:]: icon.deleteLater()
         self.lst_icon = self.lst_icon[:1]
         self.lst_icon[0].set_pil_image(const.BG_UNSELECTED)
         self.lst_id = [None]
@@ -644,38 +659,22 @@ class PropertyPanel(QWidget):
         self.target_post = parent.window() if hasattr(parent, 'window') else parent
         self.panel_selection = SelectionViewerPanel(self)
 
-        self.spin_offset_x = QSpinBox()
-        self.spin_offset_x.setRange(-250, 250)
-        self.spin_offset_y = QSpinBox()
-        self.spin_offset_y.setRange(-250, 250)
-        self.spin_angle = QSpinBox()
-        self.spin_angle.setRange(-360, 360)
-        self.spin_trans = QSpinBox()
-        self.spin_trans.setRange(0, 254)
+        self.spin_offset_x = QSpinBox(); self.spin_offset_x.setRange(-250, 250)
+        self.spin_offset_y = QSpinBox(); self.spin_offset_y.setRange(-250, 250)
+        self.spin_angle = QSpinBox(); self.spin_angle.setRange(-360, 360)
+        self.spin_trans = QSpinBox(); self.spin_trans.setRange(0, 254)
 
-        self.spin_zoom_x = QDoubleSpinBox()
-        self.spin_zoom_x.setRange(0.1, 3.0)
-        self.spin_zoom_x.setSingleStep(0.01)
-        self.spin_zoom_x.setValue(1.0)
-        self.spin_zoom_y = QDoubleSpinBox()
-        self.spin_zoom_y.setRange(0.1, 3.0)
-        self.spin_zoom_y.setSingleStep(0.01)
-        self.spin_zoom_y.setValue(1.0)
+        self.spin_zoom_x = QDoubleSpinBox(); self.spin_zoom_x.setRange(0.1, 3.0); self.spin_zoom_x.setSingleStep(0.01); self.spin_zoom_x.setValue(1.0)
+        self.spin_zoom_y = QDoubleSpinBox(); self.spin_zoom_y.setRange(0.1, 3.0); self.spin_zoom_y.setSingleStep(0.01); self.spin_zoom_y.setValue(1.0)
 
         self.combo_blend = QComboBox()
-        for mode in const.MODES_BLEND:
-            self.combo_blend.addItem(_(mode), mode)
+        for mode in const.MODES_BLEND: self.combo_blend.addItem(_(mode), mode)
         self.combo_blend.setCurrentIndex(self.combo_blend.findData(const.BlendMode.NONE))
 
-        self.ctrl_color = QPushButton()
-        self.ctrl_color.setStyleSheet("background-color: #ff0000;")
-        self.ctrl_color.setFixedSize(30, 30)
+        self.ctrl_color = QPushButton(); self.ctrl_color.setStyleSheet("background-color: #ff0000;"); self.ctrl_color.setFixedSize(30, 30)
         self.ctrl_color.clicked.connect(self.on_color_picker)
 
-        self.spin_alpha = QDoubleSpinBox()
-        self.spin_alpha.setRange(0.1, 1.0)
-        self.spin_alpha.setSingleStep(0.01)
-        self.spin_alpha.setValue(0.3)
+        self.spin_alpha = QDoubleSpinBox(); self.spin_alpha.setRange(0.1, 1.0); self.spin_alpha.setSingleStep(0.01); self.spin_alpha.setValue(0.3)
 
         self.check_alias = QCheckBox(_("アンチエイリアス"))
         self.check_flip = QCheckBox(_("左右反転"))
@@ -704,41 +703,20 @@ class PropertyPanel(QWidget):
 
         grid = QGridLayout()
         grid.addWidget(QLabel(_("オフセット")), 0, 0)
-        offset_x_layout = QHBoxLayout()
-        offset_x_layout.addWidget(QLabel("X:"))
-        offset_x_layout.addWidget(self.spin_offset_x)
-        grid.addLayout(offset_x_layout, 0, 1)
-        offset_y_layout = QHBoxLayout()
-        offset_y_layout.addWidget(QLabel("Y:"))
-        offset_y_layout.addWidget(self.spin_offset_y)
-        grid.addLayout(offset_y_layout, 0, 2)
+        ox = QHBoxLayout(); ox.addWidget(QLabel("X:")); ox.addWidget(self.spin_offset_x); grid.addLayout(ox, 0, 1)
+        oy = QHBoxLayout(); oy.addWidget(QLabel("Y:")); oy.addWidget(self.spin_offset_y); grid.addLayout(oy, 0, 2)
         grid.addWidget(self.check_alias, 0, 3)
 
-        grid.addWidget(QLabel(_("角度")), 1, 0)
-        grid.addWidget(self.spin_angle, 1, 1)
-        grid.addWidget(QLabel(""), 1, 2)
-        grid.addWidget(self.check_flip, 1, 3)
+        grid.addWidget(QLabel(_("角度")), 1, 0); grid.addWidget(self.spin_angle, 1, 1); grid.addWidget(QLabel(""), 1, 2); grid.addWidget(self.check_flip, 1, 3)
 
         grid.addWidget(QLabel(_("拡大率")), 2, 0)
-        zoom_x_layout = QHBoxLayout()
-        zoom_x_layout.addWidget(QLabel("X:"))
-        zoom_x_layout.addWidget(self.spin_zoom_x)
-        grid.addLayout(zoom_x_layout, 2, 1)
-        zoom_y_layout = QHBoxLayout()
-        zoom_y_layout.addWidget(QLabel("Y:"))
-        zoom_y_layout.addWidget(self.spin_zoom_y)
-        grid.addLayout(zoom_y_layout, 2, 2)
+        zx = QHBoxLayout(); zx.addWidget(QLabel("X:")); zx.addWidget(self.spin_zoom_x); grid.addLayout(zx, 2, 1)
+        zy = QHBoxLayout(); zy.addWidget(QLabel("Y:")); zy.addWidget(self.spin_zoom_y); grid.addLayout(zy, 2, 2)
         grid.addWidget(QLabel(""), 2, 3)
 
-        grid.addWidget(QLabel(_("透過率")), 3, 0)
-        grid.addWidget(self.spin_trans, 3, 1)
-        grid.addWidget(QLabel(""), 3, 2)
-        grid.addWidget(QLabel(""), 3, 3)
+        grid.addWidget(QLabel(_("透過率")), 3, 0); grid.addWidget(self.spin_trans, 3, 1); grid.addWidget(QLabel(""), 3, 2); grid.addWidget(QLabel(""), 3, 3)
 
-        grid.addWidget(QLabel(_("カラーブレンド")), 4, 0)
-        grid.addWidget(self.combo_blend, 4, 1)
-        grid.addWidget(self.ctrl_color, 4, 2)
-        grid.addWidget(self.spin_alpha, 4, 3)
+        grid.addWidget(QLabel(_("カラーブレンド")), 4, 0); grid.addWidget(self.combo_blend, 4, 1); grid.addWidget(self.ctrl_color, 4, 2); grid.addWidget(self.spin_alpha, 4, 3)
 
         layout.addLayout(grid)
         main_layout = QVBoxLayout(self)
@@ -788,7 +766,6 @@ class PropertyPanel(QWidget):
         mode_blend = self.combo_blend.currentData()
         color_blend = self.ctrl_color.palette().button().color().getRgb()[:3]
         alpha_blend = self.spin_alpha.value()
-
         CONFIG.manager.set_blend_color(mode_blend, color_blend, alpha_blend)
         qtlib.post_update(self.target_post, preview=True)
 
@@ -804,22 +781,15 @@ class PropertyPanel(QWidget):
         self.setStyleSheet(f"background-color: rgb({color_bg[0]}, {color_bg[1]}, {color_bg[2]});")
 
         selections = CONFIG.manager.get_images_selection()
-        if not selections:
-            self.setEnabled(False)
-        elif len(selections) == 1:
-            self.setEnabled(True)
-            self.set_properties_single(selections[0])
-        else:
-            self.setEnabled(True)
+        if not selections: self.setEnabled(False)
+        elif len(selections) == 1: self.setEnabled(True); self.set_properties_single(selections[0])
+        else: self.setEnabled(True)
 
     def set_properties_single(self, selection):
         offset_x, offset_y = selection.offset
         width, height = CONFIG.manager.size
-
-        self.spin_offset_x.setValue(offset_x)
-        self.spin_offset_y.setValue(offset_y)
-        self.spin_offset_x.setRange(-width, width)
-        self.spin_offset_y.setRange(-height, height)
+        self.spin_offset_x.setValue(offset_x); self.spin_offset_y.setValue(offset_y)
+        self.spin_offset_x.setRange(-width, width); self.spin_offset_y.setRange(-height, height)
 
         self.spin_angle.setValue(selection.angle)
         self.spin_zoom_x.setValue(selection.zoom_x)
@@ -852,15 +822,21 @@ class ThumbnailPanel(QWidget):
         super().__init__(parent)
         self.parent_widget = parent
         self.on_dialog = on_dialog
-        
+
         self.list_widget = QListWidget()
         self.list_widget.setViewMode(QListWidget.ViewMode.IconMode)
         self.list_widget.setResizeMode(QListWidget.ResizeMode.Adjust)
-        self.list_widget.setIconSize(QSize(*self.ICON_SIZE))
         self.list_widget.setMovement(QListWidget.Movement.Static)
-        self.list_widget.setSpacing(self.MARGIN)
         self.list_widget.setWordWrap(True)
-        
+
+        # ===== 暴力锁定布局，解决挤压和左偏 =====
+        self.list_widget.setIconSize(QSize(*self.ICON_SIZE))
+        self.list_widget.setGridSize(QSize(120, 140))
+        self.list_widget.setSpacing(0)
+        self.list_widget.setContentsMargins(5, 5, 5, 5)
+        self.list_widget.setStyleSheet("QListWidget::item { padding: 0px; margin: 0px; }")
+        self.list_widget.setStyleSheet("QListWidget::item { padding: 5px; }")
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.list_widget)
@@ -869,64 +845,44 @@ class ThumbnailPanel(QWidget):
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self.on_click_right)
 
+        self.threadpool = QThreadPool.globalInstance()
         self.show_button(path)
 
     def show_button(self, path):
         self.list_widget.clear()
-        if path.is_dir():
-            items = self._collect_dir(path)
-        else:
-            items = self._collect_frames(path)
 
-        for path_image, pil_image, frames in items:
-            pixmap = const.pil_to_qpixmap(pil_image)
-            text = const.DIC_ALIAS.get(path_image.stem, display(path_image.stem))
-            item = QListWidgetItem(QIcon(pixmap), text)
-            item.setData(Qt.ItemDataRole.UserRole, (path_image, frames))
-            item.setToolTip(self._tooltip_for(path_image))
+        if path.is_dir():
+            items_paths = self.get_lst_path(path)
+        else:
+            items_paths = [path]
+
+        for path_image in items_paths:
+            item = QListWidgetItem(QIcon(QPixmap.fromImage(const.UNSELECTED_QIMAGE)), _("加载中..."))
+            item.setData(Qt.ItemDataRole.UserRole, (path_image, None))
+            item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
             self.list_widget.addItem(item)
 
-    def _collect_dir(self, path_folder):
-        lst_path = self.get_lst_path(path_folder)
-        items = []
-        lst_path_sep = []
-        for path in lst_path:
-            if self.is_target_separate(path):
-                lst_path_sep.append(path)
-            else:
-                pil_img = self.get_thumb_image(path)
-                if pil_img is None: continue
-                items.append((path, pil_img, None))
+            self._start_worker(path_image, item)
 
-        for path in lst_path_sep:
-            for im_sep, path_sep in editor.separate_sprite_sheet(path):
-                icon = editor.create_icon(im_sep, self.ICON_SIZE, self.THUMB_SIZE, const.BG_PHOTO)
-                frames = [im_sep]
-                items.append((path_sep, icon, frames))
-        return items
+    def _start_worker(self, path_image, item):
+        worker = ThumbnailWorker(path_image, self, item)
+        worker.signals.finished.connect(self.on_thumb_ready)
+        worker.signals.error.connect(self.on_thumb_error)
+        self.threadpool.start(worker)
 
-    def _collect_frames(self, path_image):
-        frames = editor.get_frames(path_image)
-        if not frames: return []
-        items = []
-        for ix, frame in enumerate(frames):
-            path_frame = path_image.parent / f"{path_image.stem}【{ix + 1}】"
-            images_frame = [frame.convert("RGBA")]
-            icon = editor.create_icon(images_frame[0], self.ICON_SIZE, self.THUMB_SIZE, const.BG_PHOTO)
-            items.append((path_frame, icon, images_frame))
-        return items
+    @Slot(Path, QIcon, object)
+    def on_thumb_ready(self, path_image, icon, item):
+        if item:
+            item.setIcon(icon)
+            raw_text = const.DIC_ALIAS.get(path_image.stem, display(path_image.stem))
+            display_text = raw_text[:8] + ".." if len(raw_text) > 8 else raw_text
+            item.setText(display_text)
+            item.setToolTip(raw_text)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
 
-    def _tooltip_for(self, path_image) -> str:
-        if not path_image.is_dir():
-            return const.DIC_ALIAS.get(path_image.stem, display(path_image.stem))
-        if "行" in path_image.stem:
-            lines = [_("存在的角色素材:")]
-            try:
-                for entry in sorted(path_image.iterdir()):
-                    lines.append("    " + display(entry.stem))
-            except OSError: pass
-            return "\n".join(lines)
-        return const.DIC_ALIAS.get(path_image.stem, display(path_image.stem))
+    @Slot(Path, str)
+    def on_thumb_error(self, path_image, error_msg):
+        print(f"Thumb Error: {path_image.name} - {error_msg}")
 
     def get_lst_path(self, path_folder):
         lst_path_folder = []
@@ -991,11 +947,6 @@ class ThumbnailPanel(QWidget):
         folder_another = path_another / child_another
         return folder_another if folder_another.exists() else False
 
-    def is_target_separate(self, path):
-        is_collage = path.parent.stem == const.ImageType.COLLAGE
-        is_sep = any(word in path.stem for word in const.KEYWORDS_SEPARATE)
-        return is_collage and is_sep
-
     def on_click_left(self, item):
         path, frames = item.data(Qt.ItemDataRole.UserRole)
         if path.is_dir():
@@ -1005,7 +956,8 @@ class ThumbnailPanel(QWidget):
 
     def on_click_right(self, pos):
         item = self.list_widget.itemAt(pos)
-        if not item: return
+        if not item:
+            return
         path, frames = item.data(Qt.ItemDataRole.UserRole)
         if not path.is_dir():
             menu = menus.AppendMenu(self.parent_widget, path, frames, None)
@@ -1373,15 +1325,20 @@ class CompositePanel(QWidget):
         path_save = qtlib.save_file(self, _("GIF保存"), "*.gif", _("たぬき.gif"))
         if not path_save:
             return
+
         qtlib.post_start_progress(self.target_post, "少しお待ちください…", _("保存中"))
         thread = threading.Thread(target=self.thread_save_gif, args=(path_save,))
         thread.start()
 
     def thread_save_gif(self, path_save):
-        with qtlib.progress_context(self.target_post, "保存に失敗しました…", _("保存失敗")):
+        try:
             is_single = self.radio_single.isChecked()
             CONFIG.manager.save_gif(path_save, is_single)
             self.complete_save(path_save.parent)
+        except Exception as e:
+            qtlib.post_info(self.target_post, f"保存失败: {e}", _("错误"), QMessageBox.Icon.Critical)
+        finally:
+            qtlib.post_end_progress(self.target_post)
 
     def save_png_sequence(self):
         folder_save = qtlib.select_folder(self, _("連番PNG保存"))
