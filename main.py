@@ -282,7 +282,6 @@ def main():
         print("\n[unhandled exception] Force quitting...", flush=True)
         _on_signal(-1, None)
 
-    sys.excepthook = _excepthook
     signal.signal(signal.SIGINT, _on_signal)
     if sys.platform != "win32":
         signal.signal(signal.SIGTERM, _on_signal)

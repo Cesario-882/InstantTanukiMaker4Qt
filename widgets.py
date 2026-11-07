@@ -225,36 +225,49 @@ class PlayingStatusPanel(QWidget):
         super().__init__(parent)
         self.is_playing = False
 
-        # 使用最基础的 QLabel
-        self.btn_label = QLabel()
-        self.btn_label.setFixedSize(32, 32) # 死死锁住大小
-        self.btn_label.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_label.setAlignment(Qt.AlignmentFlag.AlignCenter) # 居中对齐
-
-        # 设置图标，强制平滑缩放
-        self.icon_play = QPixmap(str(const.PATH_PAUSE))
-        self.icon_stop = QPixmap(str(const.PATH_PLAYING))
-
-        # 这一步极其重要：如果不加，图标过大就会显示不全或者变成黑点
-        self.icon_play = self.icon_play.scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-        self.icon_stop = self.icon_stop.scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        self.btn = QWidget()
+        # 核心修改：不限制 32x32 了，让它保持 100x100，或者由图片大小决定
+        self.btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn.mousePressEvent = self.on_click
+        self.btn.paintEvent = self.paint_button
 
         layout = QHBoxLayout(self)
-        layout.addWidget(self.btn_label)
+        layout.addWidget(self.btn)
         layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
         self.set_playing(False)
-        self.btn_label.mousePressEvent = self.on_click
+
+    def paint_button(self, event):
+        from PySide6.QtGui import QPainter
+        painter = QPainter(self.btn)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        # 拿到 100x100 的原图
+        path_icon = const.PATH_PLAYING if self.is_playing else const.PATH_PAUSE
+        pixmap = QPixmap(str(path_icon))
+
+        if pixmap.isNull():
+            painter.setPen(Qt.GlobalColor.white)
+            text = "■" if self.is_playing else "▶"
+            painter.drawText(self.btn.rect(), Qt.AlignmentFlag.AlignCenter, text)
+        else:
+            # 核心修改：直接画！不缩放！因为原图就是 100x100！
+            painter.drawPixmap(0, 0, pixmap)
 
     def set_playing(self, is_playing):
         self.is_playing = is_playing
-        if is_playing:
-            self.btn_label.setPixmap(self.icon_stop)
-            self.btn_label.setToolTip(_("停止"))
+        self.btn.setToolTip(_("停止") if is_playing else _("再生"))
+
+        # 核心修改：让 Widget 的尺寸完全等于图片的 100x100 尺寸！
+        path_icon = const.PATH_PLAYING if is_playing else const.PATH_PAUSE
+        pixmap = QPixmap(str(path_icon))
+        if not pixmap.isNull():
+            self.btn.setFixedSize(pixmap.size())
         else:
-            self.btn_label.setPixmap(self.icon_play)
-            self.btn_label.setToolTip(_("再生"))
+            self.btn.setFixedSize(32, 32) # 兜底
+
+        self.btn.update()
 
     def on_click(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
