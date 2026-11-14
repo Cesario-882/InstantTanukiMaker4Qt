@@ -376,11 +376,11 @@ def filtering_dot(frames, *args):
     for im in frames:
         alpha = im.split()[-1]
         im_dot = im.convert("RGB").convert("P", palette=Image.ADAPTIVE, colors=64)
-        im_dot = (im_dot.resize([x // dot_level for x in im_dot.size], Image.LINEAR)
-                  .resize(im_dot.size, Image.LINEAR))
+        im_dot = (im_dot.resize([x // dot_level for x in im_dot.size], Image.BILINEAR)
+                  .resize(im_dot.size, Image.BILINEAR))
         alpha = alpha.convert("RGB").convert("P", palette=Image.ADAPTIVE, colors=64)
-        alpha = (alpha.resize([x // dot_level for x in alpha.size], Image.LINEAR)
-                 .resize(alpha.size, Image.LINEAR))
+        alpha = (alpha.resize([x // dot_level for x in alpha.size], Image.BILINEAR)
+                 .resize(alpha.size, Image.BILINEAR))
         alpha = Image.eval(alpha.convert("L"), lambda x: 255 if x > 0 else 0)
         im_dot = im_dot.convert("RGBA")
         im_dot.putalpha(alpha)

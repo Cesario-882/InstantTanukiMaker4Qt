@@ -226,5 +226,18 @@
   "たぬこらのプロジェクトファイルではありません！": "This is not a Tanukora project file!",
   "プロジェクトファイルにバージョン情報がありません！": "Project file has no version information!",
   "プロジェクトファイルのバージョンが今のアプリより新しいため読み込めません！\nたぬこらのバージョンをあげてみて下さい！": "Cannot load because the project file version is newer than this app!\nPlease try updating Tanukora!",
-  "チェック完了": "Check Complete"
+  "チェック完了": "Check Complete",
+  "存在するキャラクター素材:": "Available Character Assets:",
+  "素材の読み込みに失敗しました…": "Failed to load assets…",
+  "素材の読み込み失敗": "Asset Load Failed",
+  "画像フォルダを選択": "Select Image Folder",
+  "画像分割完了": "Image Split Complete",
+  "透かし文字": "Watermark Text",
+  "固定する": "Pin",
+  "元に戻す": "Reset",
+  "出力設定": "Output Settings",
+  "更新": "Update",
+  "描画": "Draw",
+  "プレビュー": "Preview",
+  "終了": "Exit"
 }

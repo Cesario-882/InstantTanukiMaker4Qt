@@ -877,6 +877,31 @@ class ThumbnailPanel(QWidget):
 
             self._start_worker(path_image, item)
 
+    def _tooltip_for(self, path_image) -> str:
+        if not path_image.is_dir():
+            return const.DIC_ALIAS.get(path_image.stem, display(path_image.stem))
+
+        if "行" in path_image.stem or path_image.stem == "幻覚":
+            lines = [_("存在するキャラクター素材:")]
+            try:
+                # 获取所有条目，并按名字排序
+                entries = sorted([e for e in path_image.iterdir() if e.is_dir() or e.is_file()])
+                # 只取前 15 个，防止 Tooltip 撑爆屏幕
+                for entry in entries[:15]:
+                    lines.append("    " + display(entry.stem))
+
+                # 如果超过 15 个，加上省略号提示
+                if len(entries) > 15:
+                    lines.append(f"    ... 以及其他 {len(entries) - 15} 个素材")
+            except OSError:
+                pass
+
+            # 【核心修复】：用 HTML 格式渲染换行，Qt 原生支持！
+            html_content = "<br>".join(lines)
+            return f"<html><body><p>{html_content}</p></body></html>"
+
+        return const.DIC_ALIAS.get(path_image.stem, display(path_image.stem))
+
     def _start_worker(self, path_image, item):
         worker = ThumbnailWorker(path_image, self, item)
         worker.signals.finished.connect(self.on_thumb_ready)
@@ -890,7 +915,7 @@ class ThumbnailPanel(QWidget):
             raw_text = const.DIC_ALIAS.get(path_image.stem, display(path_image.stem))
             display_text = raw_text[:8] + ".." if len(raw_text) > 8 else raw_text
             item.setText(display_text)
-            item.setToolTip(raw_text)
+            item.setToolTip(self._tooltip_for(path_image))
             item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
 
     @Slot(Path, str)

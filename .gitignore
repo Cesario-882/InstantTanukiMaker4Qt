@@ -33,3 +33,6 @@ Material/**/*
 添加/**/*
 !添加/**/
 !添加/**/.gitkeep
+
+# only_src 目录/dir
+only_src/

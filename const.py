@@ -20,8 +20,8 @@ import hashlib
 from dataclasses import dataclass, fields
 from PIL import Image
 import numpy as np
-
 from PySide6.QtGui import QImage, QFontDatabase, QPixmap
+from PySide6.QtCore import QStandardPaths
 
 
 VERSION = "3.0.1" # 随便填的，删掉之前记得调查引用
