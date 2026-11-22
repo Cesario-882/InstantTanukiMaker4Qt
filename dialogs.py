@@ -13,7 +13,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-# dialogs.py - PySide6 版本
 import numpy as np
 from PIL import Image, ImageDraw
 import threading

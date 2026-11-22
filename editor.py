@@ -523,7 +523,6 @@ def convert_multi_palette(frames):
 
 def save_png_sequence(folder_save, frames):
     folder_save.mkdir(exist_ok=True)
-    digits_zfill = int(math.log(len(frames), 10)) + 1
     for ix, frame in enumerate(frames):
         path_seq = folder_save / f"【F{ix + 1}】{folder_save.stem}.png"
         frame.save(path_seq)

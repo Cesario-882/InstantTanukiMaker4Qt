@@ -148,7 +148,7 @@
   "アイコンフォルダを選択": "Select Icon Folder",
   "分割画像保存": "Save Split Images",
   "保存先フォルダ|": "Save Destination Folder|",
-  "フレーム": "Frame",
+  "フレーム【{num}】": "Frame【{num}】",
   "画像構成": "Image Structure",
   "素体": "Base Body",
   "素体透過": "Base Body Transparent",
